@@ -6,10 +6,10 @@ from deep_translator import GoogleTranslator
 # ── CONFIGURACIÓN DE PÁGINA (ESTÉTICA ORIGINAL) ──────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-# ── CLAVES (Asegúrate de tener NEWSAPI_KEY en los Secrets de Streamlit Cloud) ─
+# ── CLAVES ───────────────────────────────────────────────────────────────────
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
 
-# ── TU CSS ORIGINAL (ESTÉTICA BLINDADA) ──────────────────────────────────────
+# ── TU CSS ORIGINAL (SIN TOCAR NI UN PÍXEL) ──────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -46,13 +46,15 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── DOMINIOS Y CATEGORÍAS ────────────────────────────────────────────────────
-CYBER_DOMAINS = "kitploit.com,portswigger.net,thehackernews.com,bleepingcomputer.com,darkreading.com"
+# ── DOMINIOS ESPECÍFICOS PARA CADA CATEGORÍA ─────────────────────────────────
+# Para herramientas, forzamos KitPloit y similares que son repos-orientados
+DOMAINS_TOOLS = "kitploit.com,toolswatch.org,sectoolmarket.com,github.blog,securityweek.com"
+DOMAINS_GENERAL = "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,darkreading.com"
 
 CATEGORIAS = {
     "◈ TODAS": "cybersecurity hacking",
-    "⚠ BRECHAS": '("data breach" OR "ransomware") AND (hack OR target OR victim)',
-    "⚙ HERRAMIENTAS": '("github repo" OR "new tool" OR "framework" OR "toolkit") AND ("pentesting" OR "red team" OR "forensics" OR "security utility")',
+    "⚠ BRECHAS": '("data breach" OR "ransomware") AND (hack OR victim)',
+    "⚙ HERRAMIENTAS": '("github" OR "repository" OR "exploit" OR "tool") AND ("release" OR "offensive" OR "scanner" OR "pentest")',
     "☣ CVEs": "(CVE OR vulnerability OR zero-day) AND (critical OR exploit)",
     "◉ GRUPOS APT": "(APT OR cyberespionage) AND (campaign OR targeted attack)",
     "₿ CRYPTO": "(crypto OR DeFi OR blockchain) AND (hack OR exploit OR stolen)",
@@ -73,12 +75,15 @@ def traducir_articulos(articulos):
             continue
     return articulos
 
-# ── BÚSQUEDA CON FILTRO CONDICIONAL (SOLO PARA HERRAMIENTAS) ────────────────
-def fetch_news(cat_label, page_size=25):
+# ── BÚSQUEDA ESPECIALIZADA ──────────────────────────────────────────────────
+def fetch_news(cat_label, page_size=40):
+    # Si buscamos herramientas, usamos los dominios de herramientas
+    selected_domains = DOMAINS_TOOLS if cat_label == "⚙ HERRAMIENTAS" else DOMAINS_GENERAL
+    
     try:
         r = requests.get("https://newsapi.org/v2/everything", params={
             "q": CATEGORIAS[cat_label],
-            "domains": CYBER_DOMAINS,
+            "domains": selected_domains,
             "language": "en",
             "pageSize": page_size,
             "apiKey": NEWSAPI_KEY,
@@ -87,20 +92,17 @@ def fetch_news(cat_label, page_size=25):
         
         raw_articles = r.json().get("articles", [])
         
-        # EL FILTRO SOLO SE APLICA SI ES LA SECCIÓN HERRAMIENTAS
         if cat_label == "⚙ HERRAMIENTAS":
-            prohibidas = ["malware", "stealer", "infostealer", "attack", "compromised", "infected", "fake", "campaign", "victim"]
-            utiles = ["tool", "framework", "repo", "github", "scanner", "utility", "script", "kit", "release", "library"]
-            
+            # Filtro para asegurar que hablen de un lanzamiento o repo de Github
             filtered = []
             for a in raw_articles:
                 text = (a.get("title", "") + " " + (a.get("description") or "")).lower()
-                # Filtrado: No debe tener palabras de ataque Y debe tener palabras de utilidad
-                if not any(p in text for p in prohibidas) and any(u in text for u in utiles):
-                    filtered.append(a)
-            return filtered[:10]
+                # Priorizamos lo que mencione código o herramientas ofensivas
+                if any(k in text for k in ["github", "tool", "framework", "script", "repo", "exploit"]):
+                    if not any(noise in text for noise in ["arrested", "policy", "lawsuit", "victim"]):
+                        filtered.append(a)
+            return filtered[:12]
             
-        # Para el resto de categorías, devolvemos los resultados normales
         return raw_articles[:10]
     except:
         return []
@@ -110,7 +112,7 @@ st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>
 st.markdown(f"<p style='text-align:center; font-size:0.65rem; color:rgba(0,255,136,0.4); letter-spacing:0.15em'>TERMINAL DE INTELIGENCIA &nbsp;·&nbsp; {datetime.now().strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# ── NAVEGACIÓN AUTO-REACTIVA ─────────────────────────────────────────────────
+# ── NAVEGACIÓN ───────────────────────────────────────────────────────────────
 cat_label = st.selectbox("Categoría", list(CATEGORIAS.keys()), label_visibility="collapsed")
 
 if "ultima_cat" not in st.session_state or st.session_state.ultima_cat != cat_label:
@@ -149,8 +151,6 @@ if "articles" in st.session_state and st.session_state.articles:
         </div>
         """, unsafe_allow_html=True)
 else:
-    st.markdown("<p style='text-align:center; opacity:0.3; margin-top:2rem;'>Buscando nuevas entradas...</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; opacity:0.3; margin-top:2rem;'>Escaneando nuevas utilidades...</p>", unsafe_allow_html=True)
 
-# ── PIE DE PÁGINA DINÁMICO ───────────────────────────────────────────────────
-msg_footer = "FILTRO DE HERRAMIENTAS ACTIVO" if cat_label == "⚙ HERRAMIENTAS" else "SISTEMA DE INTELIGENCIA ACTIVO"
-st.markdown(f"<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>{msg_footer}</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>INTELIGENCIA DE CÓDIGO ABIERTO (OSINT) ACTIVA</p>", unsafe_allow_html=True)
