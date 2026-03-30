@@ -1,10 +1,13 @@
 import streamlit as st
 import requests
+import json
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-NEWSAPI_KEY = "51214314c9a148fa9cf8ee9d69771431"
+NEWSAPI_KEY  = "51214314c9a148fa9cf8ee9d69771431"
+GEMINI_KEY   = "AIzaSyANtAQiQg3wdvxw6XcQxOdv1cATbOvvC5w"
+GEMINI_URL   = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
 
 st.markdown("""
 <style>
@@ -52,7 +55,6 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── Fuentes especializadas en ciberseguridad ──────────────────────────────────
 CYBER_DOMAINS = (
     "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,"
     "threatpost.com,darkreading.com,securityweek.com,"
@@ -75,77 +77,65 @@ CAT_ICONS = {
     "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿",
 }
 
-# ── Traducción en lote: UNA sola petición para todos los artículos ────────────
-SEP = " <<|>> "
-SPLIT = " [[D]] "
-
-def traducir_lote(articulos: list) -> list:
+# ── Traducción con Gemini — una sola llamada para todos los artículos ─────────
+def traducir_con_gemini(articulos: list) -> list:
     """
-    Concatena todos los títulos y descripciones en un único texto
-    y hace UNA sola llamada a MyMemory. Así no se agota el límite diario.
+    Envía todos los títulos y descripciones a Gemini en una sola llamada
+    y recibe el JSON traducido al español.
     """
-    # Construir bloque único
-    fragmentos = []
-    for a in articulos:
-        t = (a.get("title") or "").strip()[:120]
-        d = (a.get("description") or "").strip()[:180]
-        fragmentos.append(f"{t}{SPLIT}{d}")
+    # Preparar lista para enviar a Gemini
+    entrada = [
+        {"id": i, "title": (a.get("title") or "")[:150], "desc": (a.get("description") or "")[:250]}
+        for i, a in enumerate(articulos)
+    ]
 
-    bloque = SEP.join(fragmentos)
+    prompt = f"""Eres un traductor especializado en ciberseguridad. 
+Traduce al español los siguientes títulos y descripciones de noticias de ciberseguridad.
+Mantén los términos técnicos en inglés (CVE, ransomware, phishing, exploit, malware, APT, zero-day, etc).
+Devuelve SOLO un array JSON válido con el mismo formato, sin explicaciones ni markdown.
 
-    # MyMemory permite hasta 500 chars por petición en el plan gratuito sin key
-    # Si el bloque es muy largo, dividimos en dos llamadas
-    mitad = len(fragmentos) // 2
-    bloques = []
-    if len(bloque) <= 490:
-        bloques = [fragmentos]
-    else:
-        bloques = [fragmentos[:mitad], fragmentos[mitad:]]
+{json.dumps(entrada, ensure_ascii=False)}
 
-    traducidos = []
-    for grupo in bloques:
-        texto = SEP.join(grupo)[:490]
-        try:
-            r = requests.get(
-                "https://api.mymemory.translated.net/get",
-                params={"q": texto, "langpair": "en|es"},
-                timeout=8,
-            )
-            if r.status_code == 200:
-                t_texto = r.json().get("responseData", {}).get("translatedText", "")
-                partes = t_texto.split(SEP)
-                traducidos.extend(partes)
-            else:
-                traducidos.extend(grupo)  # fallback: texto original
-        except Exception:
-            traducidos.extend(grupo)
+Formato de respuesta: [{{"id": 0, "title": "...", "desc": "..."}}, ...]"""
 
-    # Reconstruir artículos con textos traducidos
-    resultado = []
-    for i, art in enumerate(articulos):
-        nuevo = dict(art)
-        if i < len(traducidos):
-            segs = traducidos[i].split(SPLIT)
-            if len(segs) >= 2:
-                nuevo["title"]       = segs[0].strip()
-                nuevo["description"] = segs[1].strip()
-            elif len(segs) == 1:
-                nuevo["title"] = segs[0].strip()
-        resultado.append(nuevo)
-    return resultado
+    try:
+        r = requests.post(
+            GEMINI_URL,
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=20,
+        )
+        if r.status_code != 200:
+            return articulos
+
+        texto = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        # Limpiar posibles backticks de markdown
+        texto = texto.strip().replace("```json", "").replace("```", "").strip()
+        traducidos = json.loads(texto)
+
+        # Mapear traducciones de vuelta a los artículos
+        mapa = {item["id"]: item for item in traducidos}
+        resultado = []
+        for i, art in enumerate(articulos):
+            nuevo = dict(art)
+            if i in mapa:
+                nuevo["title"]       = mapa[i].get("title", art.get("title"))
+                nuevo["description"] = mapa[i].get("desc",  art.get("description"))
+            resultado.append(nuevo)
+        return resultado
+
+    except Exception:
+        return articulos  # Si falla, devolver originales en inglés
 
 
 # ── NewsAPI ───────────────────────────────────────────────────────────────────
 def fetch_news(cat_label: str, page_size: int = 10) -> list:
-    query = CATEGORIAS[cat_label]
-    desde = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-
     r = requests.get(
         "https://newsapi.org/v2/everything",
         params={
-            "q": query,
+            "q": CATEGORIAS[cat_label],
             "domains": CYBER_DOMAINS,
-            "from": desde,
+            "from": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
             "sortBy": "publishedAt",
             "language": "en",
             "pageSize": page_size,
@@ -168,8 +158,7 @@ def fetch_news(cat_label: str, page_size: int = 10) -> list:
 
 def format_date(iso: str) -> str:
     try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        return dt.strftime("%d/%m/%Y")
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%d/%m/%Y")
     except Exception:
         return iso[:10] if iso else "—"
 
@@ -220,7 +209,7 @@ with col2:
     buscar = st.button("↻ BUSCAR")
 
 num_noticias = st.slider("Número de noticias", 5, 20, 10, 5)
-traducir_activo = st.toggle("🌐 Traducir al español", value=True)
+traducir_activo = st.toggle("🌐 Traducir al español (Gemini)", value=True)
 
 # ── Sesión ────────────────────────────────────────────────────────────────────
 for k, v in [("articles", []), ("ultima_cat", None), ("ultima_sync", None)]:
@@ -230,11 +219,11 @@ for k, v in [("articles", []), ("ultima_cat", None), ("ultima_sync", None)]:
 cargar = buscar or st.session_state.ultima_cat != cat_label
 
 if cargar:
-    with st.spinner("⚡ Buscando noticias de ciberseguridad..."):
+    with st.spinner("⚡ Buscando y traduciendo noticias..."):
         try:
             arts = fetch_news(cat_label, page_size=num_noticias)
             if traducir_activo and arts:
-                arts = traducir_lote(arts)
+                arts = traducir_con_gemini(arts)
             st.session_state.articles    = arts
             st.session_state.ultima_cat  = cat_label
             st.session_state.ultima_sync = datetime.now().strftime("%H:%M:%S")
@@ -242,7 +231,7 @@ if cargar:
             st.error(f"⚠ {e}")
             st.session_state.articles = []
         except Exception as e:
-            st.error(f"⚠ Error de conexión: {e}")
+            st.error(f"⚠ Error: {e}")
             st.session_state.articles = []
 
 # ── Resultados ────────────────────────────────────────────────────────────────
