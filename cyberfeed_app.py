@@ -3,10 +3,10 @@ import requests
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 
-# ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
+# ── CONFIGURACIÓN DE PÁGINA (ESTÉTICA ORIGINAL) ──────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-# ── CLAVES (Configúralas en Secrets de Streamlit Cloud al subir a GitHub) ─────
+# ── CLAVES (Asegúrate de tener NEWSAPI_KEY en los Secrets de Streamlit Cloud) ─
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
 
 # ── TU CSS ORIGINAL (ESTÉTICA BLINDADA) ──────────────────────────────────────
@@ -47,21 +47,20 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 """, unsafe_allow_html=True)
 
 # ── DOMINIOS Y CATEGORÍAS ────────────────────────────────────────────────────
-# Hemos añadido kitploit para mejorar la calidad de "Herramientas"
-CYBER_DOMAINS = "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,darkreading.com,kitploit.com,portswigger.net"
+CYBER_DOMAINS = "kitploit.com,portswigger.net,thehackernews.com,bleepingcomputer.com,darkreading.com"
 
 CATEGORIAS = {
     "◈ TODAS": "cybersecurity hacking",
-    "⚠ BRECHAS": '("data breach" OR "ransomware" OR "leaked database") AND (hack OR attack)',
-    "⚙ HERRAMIENTAS": '("github.com" OR "release" OR "tool") AND ("exploit" OR "pentesting" OR "red team" OR "osint" OR "scanner" OR "payload")',
+    "⚠ BRECHAS": '("data breach" OR "ransomware") AND (hack OR target OR victim)',
+    "⚙ HERRAMIENTAS": '("github repo" OR "new tool" OR "framework" OR "toolkit") AND ("pentesting" OR "red team" OR "forensics" OR "security utility")',
     "☣ CVEs": "(CVE OR vulnerability OR zero-day) AND (critical OR exploit)",
-    "◉ GRUPOS APT": "(APT OR cyberespionage OR state-sponsored) AND (hacking OR campaign)",
+    "◉ GRUPOS APT": "(APT OR cyberespionage) AND (campaign OR targeted attack)",
     "₿ CRYPTO": "(crypto OR DeFi OR blockchain) AND (hack OR exploit OR stolen)",
 }
 
 CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
 
-# ── LÓGICA DE TRADUCCIÓN (ESTABLE) ───────────────────────────────────────────
+# ── LÓGICA DE TRADUCCIÓN ─────────────────────────────────────────────────────
 def traducir_articulos(articulos):
     translator = GoogleTranslator(source='en', target='es')
     for art in articulos:
@@ -74,8 +73,8 @@ def traducir_articulos(articulos):
             continue
     return articulos
 
-# ── LÓGICA DE NOTICIAS CON FILTRO ANTI-RUIDO ─────────────────────────────────
-def fetch_news(cat_label, page_size=15):
+# ── BÚSQUEDA CON FILTRO CONDICIONAL (SOLO PARA HERRAMIENTAS) ────────────────
+def fetch_news(cat_label, page_size=25):
     try:
         r = requests.get("https://newsapi.org/v2/everything", params={
             "q": CATEGORIAS[cat_label],
@@ -88,18 +87,20 @@ def fetch_news(cat_label, page_size=15):
         
         raw_articles = r.json().get("articles", [])
         
-        # Filtro de limpieza específico para Herramientas
+        # EL FILTRO SOLO SE APLICA SI ES LA SECCIÓN HERRAMIENTAS
         if cat_label == "⚙ HERRAMIENTAS":
-            # Palabras que suelen traer noticias aburridas o políticas
-            palabras_ruido = ["investigates", "investiga", "commission", "opinion", "policy", "court", "lawsuit", "art", "eu "]
-            filtered_arts = []
-            for art in raw_articles:
-                title_lower = art.get("title", "").lower()
-                # Solo permitimos si NO tiene palabras de ruido
-                if not any(noise in title_lower for noise in palabras_ruido):
-                    filtered_arts.append(art)
-            return filtered_arts[:10]
+            prohibidas = ["malware", "stealer", "infostealer", "attack", "compromised", "infected", "fake", "campaign", "victim"]
+            utiles = ["tool", "framework", "repo", "github", "scanner", "utility", "script", "kit", "release", "library"]
             
+            filtered = []
+            for a in raw_articles:
+                text = (a.get("title", "") + " " + (a.get("description") or "")).lower()
+                # Filtrado: No debe tener palabras de ataque Y debe tener palabras de utilidad
+                if not any(p in text for p in prohibidas) and any(u in text for u in utiles):
+                    filtered.append(a)
+            return filtered[:10]
+            
+        # Para el resto de categorías, devolvemos los resultados normales
         return raw_articles[:10]
     except:
         return []
@@ -109,12 +110,11 @@ st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>
 st.markdown(f"<p style='text-align:center; font-size:0.65rem; color:rgba(0,255,136,0.4); letter-spacing:0.15em'>TERMINAL DE INTELIGENCIA &nbsp;·&nbsp; {datetime.now().strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# ── CONTROLES AUTO-REACTIVOS ─────────────────────────────────────────────────
+# ── NAVEGACIÓN AUTO-REACTIVA ─────────────────────────────────────────────────
 cat_label = st.selectbox("Categoría", list(CATEGORIAS.keys()), label_visibility="collapsed")
 
-# Si la categoría cambia, disparamos la búsqueda automáticamente
 if "ultima_cat" not in st.session_state or st.session_state.ultima_cat != cat_label:
-    with st.spinner(f"⚡ ESCANEANDO {cat_label}..."):
+    with st.spinner(f"⚡ ACCEDIENDO AL SECTOR: {cat_label}..."):
         arts = fetch_news(cat_label)
         if arts:
             st.session_state.articles = traducir_articulos(arts)
@@ -122,7 +122,7 @@ if "ultima_cat" not in st.session_state or st.session_state.ultima_cat != cat_la
         else:
             st.session_state.articles = []
 
-# ── RENDERIZADO DE NOTICIAS ──────────────────────────────────────────────────
+# ── RENDERIZADO ──────────────────────────────────────────────────────────────
 if "articles" in st.session_state and st.session_state.articles:
     for art in st.session_state.articles:
         title = art.get("title") or "Sin título"
@@ -149,7 +149,8 @@ if "articles" in st.session_state and st.session_state.articles:
         </div>
         """, unsafe_allow_html=True)
 else:
-    st.markdown("<p style='text-align:center; opacity:0.3; margin-top:2rem;'>Buscando nuevas entradas en el sector...</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; opacity:0.3; margin-top:2rem;'>Buscando nuevas entradas...</p>", unsafe_allow_html=True)
 
-# ── PIE DE PÁGINA ────────────────────────────────────────────────────────────
-st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>SISTEMA DE FILTRADO DE HERRAMIENTAS ACTIVO</p>", unsafe_allow_html=True)
+# ── PIE DE PÁGINA DINÁMICO ───────────────────────────────────────────────────
+msg_footer = "FILTRO DE HERRAMIENTAS ACTIVO" if cat_label == "⚙ HERRAMIENTAS" else "SISTEMA DE INTELIGENCIA ACTIVO"
+st.markdown(f"<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>{msg_footer}</p>", unsafe_allow_html=True)
