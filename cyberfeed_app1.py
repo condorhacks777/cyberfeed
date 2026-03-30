@@ -7,7 +7,7 @@ from deep_translator import GoogleTranslator
 # ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-# ── DISEÑO TERMINAL HACKER ───────────────────────────────────────────────────
+# ── DISEÑO TERMINAL HACKER (CSS) ─────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -23,28 +23,38 @@ body::after {
     pointer-events: none; z-index: 9999;
 }
 h1 { font-family: 'Orbitron', monospace !important; color: #00ff88 !important; letter-spacing: 0.15em !important; text-shadow: 0 0 8px rgba(0,255,136,0.6); }
+.stSelectbox > div > div {
+    background: #000a03 !important;
+    border: 1px solid rgba(0,255,136,0.3) !important;
+    color: #00ff88 !important;
+    border-radius: 0 !important;
+}
 .news-card {
     border: 1px solid rgba(0,255,136,0.2);
     border-left: 4px solid #00ff88;
     background: rgba(0,20,10,0.85);
     padding: 1.2rem;
     margin-bottom: 1rem;
+    transition: all 0.3s ease;
 }
-.stSelectbox > div > div { background: #000a03 !important; color: #00ff88 !important; border: 1px solid rgba(0,255,136,0.3) !important; }
+.news-card:hover { border-color: #ffffff; background: rgba(0,40,20,0.9); transform: translateX(5px); }
+hr { border-color: rgba(0,255,136,0.2) !important; }
 p, li, span, label { color: rgba(200,255,200,0.9) !important; }
 #MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 2rem !important; max-width: 800px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── FUENTES ACTUALIZADAS (2026 READY) ────────────────────────────────────────
+# ── FUENTES DE INTELIGENCIA (ORDENADAS POR RELEVANCIA) ───────────────────────
 FEEDS = {
     "◈ TODAS": ["https://thehackernews.com/feeds/posts/default", "https://www.bleepingcomputer.com/feed/"],
     "⚠ BRECHAS": ["https://www.bleepingcomputer.com/feed/", "https://krebsonsecurity.com/feed/"],
     "⚙ HERRAMIENTAS": ["https://www.kitploit.com/feeds/posts/default", "https://packetstormsecurity.com/feeds/public/"],
     "☣ CVEs": [
-        "https://seclists.org/rss/fulldisclosure.rss",  # Avisos frescos (Apple, Cisco, etc)
-        "https://www.vulnerability-lab.com/rss/rss.php", # Últimos hallazgos
-        "https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss.xml" # NIST (Filtrado por año)
+        "https://seclists.org/rss/fulldisclosure.rss",
+        "https://packetstormsecurity.com/feeds/advisories/",
+        "https://www.vulnerability-lab.com/rss/rss.php",
+        "https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss.xml"
     ],
     "◉ GRUPOS APT": ["https://thehackernews.com/search/label/APT", "https://www.mandiant.com/resources/blog/rss.xml"],
     "₿ CRYPTO": ["https://www.rekt.news/rss"]
@@ -53,9 +63,9 @@ FEEDS = {
 CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
 
 # ── PROCESAMIENTO ───────────────────────────────────────────────────────────
-@st.cache_data(ttl=1200)
+@st.cache_data(ttl=900)
 def limpiar_y_traducir(texto):
-    if not texto: return "Sin descripción."
+    if not texto: return "Sin descripción técnica."
     clean = re.sub('<[^<]+?>', '', texto).strip()
     try:
         return GoogleTranslator(source='en', target='es').translate(clean[:400])
@@ -65,9 +75,9 @@ def limpiar_y_traducir(texto):
 def fetch_intel(cat_label):
     articles = []
     urls = FEEDS.get(cat_label, [])
-    
-    # SOLO QUEREMOS ESTOS AÑOS
-    YEARS_ALLOWED = ["2025", "2026"] 
+    current_year = str(datetime.now().year)
+    prev_year = str(datetime.now().year - 1)
+    allowed_years = [current_year, prev_year]
 
     for url in urls:
         try:
@@ -75,23 +85,22 @@ def fetch_intel(cat_label):
             for entry in feed.entries[:15]:
                 title = entry.title
                 desc = entry.get("summary", entry.get("description", ""))
+                content_lower = (title + desc).lower()
                 
-                # --- FILTRO CRONOLÓGICO PARA CVEs ---
                 if cat_label == "☣ CVEs":
-                    content = (title + desc).lower()
-                    # Si menciona un CVE antiguo (ej: CVE-2017), lo descartamos
-                    if "cve-" in content:
-                        if not any(year in content for year in YEARS_ALLOWED):
+                    cve_match = re.search(r'cve-\d{4}', content_lower)
+                    if cve_match:
+                        found_year = cve_match.group().split('-')[1]
+                        if found_year not in allowed_years:
                             continue
-                    # Si no menciona CVE ni vulnerabilidad técnica reciente, fuera
-                    if not any(k in content for k in ["vulnerability", "exploit", "cve-", "apple-sa-"]):
+                    tech_keywords = ["vulnerability", "exploit", "cve-", "apple-sa-", "security advisory"]
+                    if not any(k in content_lower for k in tech_keywords):
                         continue
 
                 source = url.split("//")[1].split("/")[0].replace("www.", "").upper()
                 articles.append({"title": title, "description": desc, "link": entry.link, "source": source})
         except: continue
             
-    # Únicos
     unique = []
     seen = set()
     for a in articles:
@@ -100,14 +109,26 @@ def fetch_intel(cat_label):
             seen.add(a['title'].lower())
     return unique[:12]
 
-# ── UI ───────────────────────────────────────────────────────────────────────
+# ── CABECERA CON FIRMA BY CONDORHACKS ────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
-st.markdown(f"<p style='text-align:center; font-size:0.65rem; color:rgba(0,255,136,0.4);'>INTEL ACTUALIZADA · {datetime.now().strftime('%H:%M')}</p>", unsafe_allow_html=True)
+
+st.markdown(f"""
+<div style='text-align:center; margin-top:-0.5rem; margin-bottom:1.5rem;'>
+    <p style='font-size:0.65rem; color:rgba(0,255,136,0.6); letter-spacing:0.15em; margin:0;'>
+        INTEL ACTUALIZADA · {datetime.now().strftime('%H:%M')}
+    </p>
+    <p style='font-size:0.55rem; color:rgba(0,255,136,0.25); letter-spacing:0.25em; font-style:italic; margin-top:0.3rem; text-transform:uppercase;'>
+        by condorhacks
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
 st.markdown("---")
 
+# ── SELECTOR Y RESULTADOS ───────────────────────────────────────────────────
 cat_label = st.selectbox("Sector", list(FEEDS.keys()), label_visibility="collapsed")
 
-with st.spinner("Filtrando vulnerabilidades obsoletas..."):
+with st.spinner("Sincronizando con el satélite..."):
     results = fetch_intel(cat_label)
     if results:
         for art in results:
@@ -115,14 +136,24 @@ with st.spinner("Filtrando vulnerabilidades obsoletas..."):
             t_desc = limpiar_y_traducir(art["description"])
             st.markdown(f"""
             <div class="news-card">
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.6rem;">
                     <span style="font-size:0.65rem; color:#00cfff; font-weight:bold;">{CAT_ICONS.get(cat_label, "◈")} {cat_label.split()[-1]}</span>
                     <span style="font-size:0.55rem; color:rgba(0,255,136,0.4);">{art['source']}</span>
                 </div>
-                <div style="font-size:1rem; font-weight:bold; margin-bottom:0.6rem;">{t_title}</div>
-                <div style="font-size:0.8rem; color:rgba(200,255,200,0.7); line-height:1.5; margin-bottom:0.8rem;">{t_desc}</div>
-                <a href="{art['link']}" target="_blank" style="color:#00ff88; font-size:0.7rem; text-decoration:none; border: 1px solid #00ff88; padding: 3px 8px;">ANALIZAR NODO ▶</a>
+                <div style="font-size:1rem; color:#ffffff; font-weight:bold; line-height:1.3; margin-bottom:0.7rem;">
+                    {t_title}
+                </div>
+                <div style="font-size:0.82rem; color:rgba(200,255,200,0.8); line-height:1.6; margin-bottom:1rem;">
+                    {t_desc}
+                </div>
+                <div style="text-align:right;">
+                    <a href="{art['link']}" target="_blank" style="color:#00ff88; font-size:0.7rem; text-decoration:none; border: 1px solid rgba(0,255,136,0.4); padding: 4px 10px; border-radius: 2px;">
+                        ANALIZAR NODO ▶
+                    </a>
+                </div>
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.error("No hay vulnerabilidades críticas detectadas en las últimas 48h.")
+        st.error("⚠️ Filtro temporal activo: No hay amenazas críticas detectadas en las últimas 48h.")
+
+st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.1); margin-top:4rem;'>ENCRIPTACIÓN RSA-4096 ACTIVA | RSS FEED DIRECTO | NODO ALCALÁ</p>", unsafe_allow_html=True)
