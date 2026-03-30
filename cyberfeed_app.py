@@ -6,7 +6,7 @@ from deep_translator import GoogleTranslator
 # ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-# ── CLAVES ───────────────────────────────────────────────────────────────────
+# ── CLAVES (Asegúrate de tener NEWSAPI_KEY en los Secrets de Streamlit Cloud) ─
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
 
 # ── TU CSS ORIGINAL (INTACTO) ────────────────────────────────────────────────
@@ -46,33 +46,46 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── CONSTANTES ───────────────────────────────────────────────────────────────
+# ── DOMINIOS DE CONFIANZA ────────────────────────────────────────────────────
+CYBER_DOMAINS = "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,darkreading.com,kitploit.com,portswigger.net"
+
+# ── CATEGORÍAS CON QUERIES MEJORADAS ─────────────────────────────────────────
 CATEGORIAS = {
     "◈ TODAS": "cybersecurity hacking",
-    "⚠ BRECHAS": "data breach ransomware",
-    "⚙ HERRAMIENTAS": "hacking tools github",
-    "☣ CVEs": "vulnerability CVE",
-    "◉ GRUPOS APT": "APT hacking group",
-    "₿ CRYPTO": "crypto hack defi",
+    "⚠ BRECHAS": '("data breach" OR "ransomware" OR "leaked database") AND (hack OR attack)',
+    "⚙ HERRAMIENTAS": '("github.com" OR "release" OR "tool") AND ("exploit" OR "pentesting" OR "red team" OR "osint" OR "scanner")',
+    "☣ CVEs": "(CVE OR vulnerability OR zero-day) AND (critical OR exploit)",
+    "◉ GRUPOS APT": "(APT OR cyberespionage OR state-sponsored) AND (hacking OR campaign)",
+    "₿ CRYPTO": "(crypto OR DeFi OR blockchain) AND (hack OR exploit OR stolen)",
 }
 
-CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
+CAT_ICONS = {
+    "◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙", 
+    "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"
+}
 
 # ── LÓGICA DE TRADUCCIÓN ─────────────────────────────────────────────────────
 def traducir_articulos(articulos):
     translator = GoogleTranslator(source='en', target='es')
     for art in articulos:
         try:
-            if art.get("title"): art["title"] = translator.translate(art["title"])
-            if art.get("description"): art["description"] = translator.translate(art["description"][:400])
-        except: continue
+            if art.get("title"): 
+                art["title"] = translator.translate(art["title"])
+            if art.get("description"): 
+                art["description"] = translator.translate(art["description"][:400])
+        except: 
+            continue
     return articulos
 
-# ── LÓGICA DE NOTICIAS ───────────────────────────────────────────────────────
-def fetch_news(cat_label, page_size=10):
+# ── LÓGICA DE NOTICIAS (NewsAPI) ─────────────────────────────────────────────
+def fetch_news(cat_label, page_size=12):
     r = requests.get("https://newsapi.org/v2/everything", params={
-        "q": CATEGORIAS[cat_label], "language": "en",
-        "pageSize": page_size, "apiKey": NEWSAPI_KEY, "sortBy": "publishedAt"
+        "q": CATEGORIAS[cat_label],
+        "domains": CYBER_DOMAINS,
+        "language": "en",
+        "pageSize": page_size,
+        "apiKey": NEWSAPI_KEY,
+        "sortBy": "publishedAt"
     }, timeout=10)
     return r.json().get("articles", [])
 
@@ -81,22 +94,22 @@ st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>
 st.markdown(f"<p style='text-align:center; font-size:0.65rem; color:rgba(0,255,136,0.4); letter-spacing:0.15em'>TERMINAL DE INTELIGENCIA &nbsp;·&nbsp; {datetime.now().strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# ── CONTROLES AUTOMÁTICOS ────────────────────────────────────────────────────
-# Al cambiar el selectbox, Streamlit recarga el script automáticamente
+# ── CONTROLES AUTOMÁTICOS (SIN BOTÓN) ────────────────────────────────────────
 cat_label = st.selectbox("Categoría", list(CATEGORIAS.keys()), label_visibility="collapsed")
 
-# Ejecución automática: Si la categoría cambia o no hay artículos, buscamos
+# Lógica de carga automática al cambiar el Selectbox
 if "ultima_cat" not in st.session_state or st.session_state.ultima_cat != cat_label:
     with st.spinner(f"⚡ ESCANEANDO {cat_label}..."):
         try:
             arts = fetch_news(cat_label)
+            # Traducimos automáticamente
             st.session_state.articles = traducir_articulos(arts)
             st.session_state.ultima_cat = cat_label
         except Exception as e:
-            st.error(f"Error de red: {e}")
+            st.error(f"Error de conexión: {e}")
 
-# ── RENDERIZADO ──────────────────────────────────────────────────────────────
-if "articles" in st.session_state:
+# ── RENDERIZADO DE NOTICIAS ──────────────────────────────────────────────────
+if "articles" in st.session_state and st.session_state.articles:
     for art in st.session_state.articles:
         title = art.get("title") or "Sin título"
         desc = art.get("description") or "Sin descripción disponible."
@@ -121,6 +134,8 @@ if "articles" in st.session_state:
             </a>
         </div>
         """, unsafe_allow_html=True)
+else:
+    st.markdown("<p style='text-align:center; opacity:0.3;'>No se han encontrado datos en este sector.</p>", unsafe_allow_html=True)
 
-# ── PIE DE PÁGINA ───────────────────────────────────────────────────────────
-st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>ACTUALIZACIÓN AUTOMÁTICA ACTIVADA</p>", unsafe_allow_html=True)
+# ── PIE DE PÁGINA ────────────────────────────────────────────────────────────
+st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>ACTUALIZACIÓN AUTOMÁTICA ACTIVADA • 2026</p>", unsafe_allow_html=True)
