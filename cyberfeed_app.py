@@ -2,19 +2,17 @@ import streamlit as st
 import requests
 import json
 import re
-import os
 from datetime import datetime, timedelta
 
 # ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-# ── GESTIÓN DE CLAVES (SECRETS) ──────────────────────────────────────────────
-# Para local, usa tus strings. Para GitHub/Streamlit Cloud, usa st.secrets
+# ── GESTIÓN DE CLAVES ────────────────────────────────────────────────────────
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
 GEMINI_KEY  = st.secrets.get("GEMINI_KEY", "AIzaSyANtAQiQg3wdvxw6XcQxOdv1cATbOvvC5w")
 GEMINI_URL  = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
-# ── CSS PERSONALIZADO (MANTENIDO INTACTO) ────────────────────────────────────
+# ── CSS PERSONALIZADO (TU ESTÉTICA ORIGINAL) ─────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -61,7 +59,6 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── DOMINIOS Y CATEGORÍAS ────────────────────────────────────────────────────
 CYBER_DOMAINS = (
     "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,"
     "threatpost.com,darkreading.com,securityweek.com,"
@@ -84,20 +81,20 @@ CAT_ICONS = {
     "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿",
 }
 
-# ── Traducción Optimizada (Evita Error 429) ──────────────────────────────────
+# ── Traducción con Gemini (CORREGIDA) ─────────────────────────────────────────
 def traducir_con_gemini(articulos: list) -> tuple:
     if not articulos: return [], None
     
-    # Recortamos drásticamente el input para no saturar el token limit y la cuota
     entrada = [
         {"id": i, "title": (a.get("title") or "")[:120], "desc": (a.get("description") or "")[:180]}
         for i, a in enumerate(articulos)
     ]
 
+    # Usamos dobles llaves {{ }} para que Python no crea que son variables de string
     prompt = f"""Traduce a español técnico. Mantén términos como CVE, Ransomware, Exploit, Breach.
     Responde SOLO con un array JSON puro.
     Input: {json.dumps(entrada)}
-    Output Format: [{"id":0,"title":"...","desc":"..."}]"""
+    Output Format: [{{ "id": 0, "title": "...", "desc": "..." }}]"""
 
     try:
         r = requests.post(
@@ -107,18 +104,14 @@ def traducir_con_gemini(articulos: list) -> tuple:
             timeout=20,
         )
 
-        if r.status_code == 429:
-            return articulos, "Límite de cuota Gemini alcanzado (RPM). Espera 60s."
         if r.status_code != 200:
             return articulos, f"Error {r.status_code}"
 
-        # Limpieza robusta de la respuesta
         raw_text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
         raw_text = re.sub(r"```json|```", "", raw_text).strip()
         
-        # Extraer solo el contenido entre corchetes por si Gemini añade texto extra
         match = re.search(r"\[.*\]", raw_text, re.DOTALL)
-        if not match: raise ValueError("No JSON found")
+        if not match: return articulos, "No se encontró JSON"
         
         traducidos = json.loads(match.group(0))
         mapa = {item["id"]: item for item in traducidos}
@@ -131,11 +124,10 @@ def traducir_con_gemini(articulos: list) -> tuple:
                 nuevo["description"] = mapa[i].get("desc", art.get("description"))
             resultado.append(nuevo)
         return resultado, None
-
     except Exception as e:
-        return articulos, f"Error en traducción: {str(e)[:50]}"
+        return articulos, f"Error: {str(e)[:50]}"
 
-# ── Lógica de Noticias y Renderizado ─────────────────────────────────────────
+# ── Lógica de Noticias ───────────────────────────────────────────────────────
 def fetch_news(cat_label: str, page_size: int = 10) -> list:
     r = requests.get(
         "https://newsapi.org/v2/everything",
@@ -186,9 +178,8 @@ def render_card(article: dict, cat_label: str):
     </div>
     """, unsafe_allow_html=True)
 
-# ── Interfaz Principal ───────────────────────────────────────────────────────
+# ── Interfaz ─────────────────────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
-st.markdown(f"<p style='text-align:center; font-size:0.65rem; color:rgba(0,255,136,0.4); letter-spacing:0.15em'>TERMINAL DE INTELIGENCIA &nbsp;·&nbsp; {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>", unsafe_allow_html=True)
 st.markdown("---")
 
 col1, col2 = st.columns([3, 1])
@@ -197,34 +188,23 @@ with col1:
 with col2:
     buscar = st.button("↻ BUSCAR")
 
-num_noticias = st.slider("Número de noticias", 5, 20, 10, 5)
-traducir_activo = st.toggle("🌐 Traducir al español (Gemini)", value=True)
+num_noticias = st.slider("Noticias", 5, 20, 10, 5)
+traducir_activo = st.toggle("🌐 Traducción Gemini", value=True)
 
-# ── Estado de Sesión ─────────────────────────────────────────────────────────
 if "articles" not in st.session_state: st.session_state.articles = []
 if "ultima_cat" not in st.session_state: st.session_state.ultima_cat = None
-if "gemini_error" not in st.session_state: st.session_state.gemini_error = None
 
 if buscar or st.session_state.ultima_cat != cat_label:
-    st.session_state.gemini_error = None
-    with st.spinner("⚡ Accediendo a la red..."):
+    with st.spinner("⚡ SCANNING..."):
         try:
             arts = fetch_news(cat_label, page_size=num_noticias)
             if traducir_activo and arts:
                 arts, err = traducir_con_gemini(arts)
-                st.session_state.gemini_error = err
+                if err: st.warning(err)
             st.session_state.articles = arts
             st.session_state.ultima_cat = cat_label
-            st.session_state.ultima_sync = datetime.now().strftime("%H:%M:%S")
         except Exception as e:
-            st.error(f"⚠ Error: {e}")
+            st.error(f"Error: {e}")
 
-if st.session_state.gemini_error:
-    st.warning(f"⚠ {st.session_state.gemini_error}")
-
-if st.session_state.articles:
-    for art in st.session_state.articles:
-        render_card(art, cat_label)
-    st.markdown("<p style='text-align:center; font-size:0.58rem; color:rgba(0,255,136,0.2); margin-top:1rem;'>◈ CYBERFEED · REAL-TIME THREAT INTELLIGENCE ◈</p>", unsafe_allow_html=True)
-elif not buscar:
-    st.info("Selecciona una categoría y pulsa ↻ BUSCAR.")
+for art in st.session_state.articles:
+    render_card(art, cat_label)
