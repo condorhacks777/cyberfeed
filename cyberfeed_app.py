@@ -57,14 +57,16 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 CYBER_DOMAINS = (
     "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,"
     "threatpost.com,darkreading.com,securityweek.com,"
-    "cyberscoop.com,wired.com,arstechnica.com,techcrunch.com"
+    "cyberscoop.com,wired.com,arstechnica.com,techcrunch.com,"
+    "portswigger.net,helpnetsecurity.com,infosecurity-magazine.com,"
+    "github.blog,offensive-security.com,kitploit.com"
 )
 
 # ── Queries estrictamente técnicas por categoría ──────────────────────────────
 CATEGORIAS = {
     "◈ TODAS":         "cybersecurity hacking (breach OR ransomware OR malware OR CVE OR exploit OR vulnerability)",
     "⚠ BRECHAS":       "(\"data breach\" OR \"data leak\" OR ransomware) (company OR hospital OR government OR million records)",
-    "⚙ HERRAMIENTAS":  "(hacking tool OR pentest OR exploit OR \"red team\" OR \"offensive security\") (released OR new OR github)",
+    "⚙ HERRAMIENTAS":  "(\"new tool\" OR \"open source tool\" OR \"released\" OR \"github\" OR \"framework\") (pentest OR \"red team\" OR \"offensive security\" OR \"security tool\" OR \"hacking tool\" OR nmap OR metasploit OR burpsuite OR wireshark)",
     "☣ CVEs":          "(CVE OR vulnerability OR \"zero-day\" OR \"patch tuesday\") (critical OR high severity OR CVSS)",
     "◉ GRUPOS APT":    "(APT OR \"nation state\" OR \"state sponsored\") (hacking OR cyberespionage OR campaign OR attack)",
     "₿ CRYPTO":        "(crypto OR DeFi OR blockchain OR NFT OR exchange) (hack OR exploit OR stolen OR breach OR million)",
