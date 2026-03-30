@@ -5,9 +5,9 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-NEWSAPI_KEY  = "51214314c9a148fa9cf8ee9d69771431"
-GEMINI_KEY   = "AIzaSyANtAQiQg3wdvxw6XcQxOdv1cATbOvvC5w"
-GEMINI_URL   = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
+NEWSAPI_KEY = "51214314c9a148fa9cf8ee9d69771431"
+GEMINI_KEY  = "AIzaSyANtAQiQg3wdvxw6XcQxOdv1cATbOvvC5w"
+GEMINI_URL  = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
 
 st.markdown("""
 <style>
@@ -77,43 +77,38 @@ CAT_ICONS = {
     "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿",
 }
 
-# ── Traducción con Gemini — una sola llamada para todos los artículos ─────────
-def traducir_con_gemini(articulos: list) -> list:
+# ── Traducción con Gemini ─────────────────────────────────────────────────────
+def traducir_con_gemini(articulos: list) -> tuple:
     """
-    Envía todos los títulos y descripciones a Gemini en una sola llamada
-    y recibe el JSON traducido al español.
+    Devuelve (articulos_traducidos, error_msg).
+    error_msg es None si todo fue bien.
     """
-    # Preparar lista para enviar a Gemini
     entrada = [
         {"id": i, "title": (a.get("title") or "")[:150], "desc": (a.get("description") or "")[:250]}
         for i, a in enumerate(articulos)
     ]
 
-    prompt = f"""Eres un traductor especializado en ciberseguridad. 
-Traduce al español los siguientes títulos y descripciones de noticias de ciberseguridad.
-Mantén los términos técnicos en inglés (CVE, ransomware, phishing, exploit, malware, APT, zero-day, etc).
-Devuelve SOLO un array JSON válido con el mismo formato, sin explicaciones ni markdown.
-
-{json.dumps(entrada, ensure_ascii=False)}
-
-Formato de respuesta: [{{"id": 0, "title": "...", "desc": "..."}}, ...]"""
+    prompt = f"""Eres un traductor especializado en ciberseguridad.
+Traduce al español los títulos y descripciones. Mantén términos técnicos en inglés (CVE, ransomware, phishing, exploit, malware, APT, zero-day, DeFi, etc).
+Devuelve SOLO el array JSON, sin markdown ni explicaciones.
+Input: {json.dumps(entrada, ensure_ascii=False)}
+Output format: [{{"id": 0, "title": "...", "desc": "..."}}, ...]"""
 
     try:
         r = requests.post(
             GEMINI_URL,
             headers={"Content-Type": "application/json"},
             json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=20,
+            timeout=25,
         )
+
         if r.status_code != 200:
-            return articulos
+            return articulos, f"Gemini error {r.status_code}: {r.text[:200]}"
 
-        texto = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        # Limpiar posibles backticks de markdown
-        texto = texto.strip().replace("```json", "").replace("```", "").strip()
-        traducidos = json.loads(texto)
+        raw = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        raw = raw.strip().replace("```json", "").replace("```", "").strip()
+        traducidos = json.loads(raw)
 
-        # Mapear traducciones de vuelta a los artículos
         mapa = {item["id"]: item for item in traducidos}
         resultado = []
         for i, art in enumerate(articulos):
@@ -122,10 +117,16 @@ Formato de respuesta: [{{"id": 0, "title": "...", "desc": "..."}}, ...]"""
                 nuevo["title"]       = mapa[i].get("title", art.get("title"))
                 nuevo["description"] = mapa[i].get("desc",  art.get("description"))
             resultado.append(nuevo)
-        return resultado
+        return resultado, None
 
-    except Exception:
-        return articulos  # Si falla, devolver originales en inglés
+    except requests.exceptions.ConnectionError as e:
+        return articulos, f"Error de conexión con Gemini: {str(e)[:150]}"
+    except requests.exceptions.Timeout:
+        return articulos, "Gemini tardó demasiado (timeout). Inténtalo de nuevo."
+    except json.JSONDecodeError as e:
+        return articulos, f"Gemini devolvió JSON inválido: {str(e)[:150]}"
+    except Exception as e:
+        return articulos, f"Error inesperado en Gemini: {str(e)[:150]}"
 
 
 # ── NewsAPI ───────────────────────────────────────────────────────────────────
@@ -148,7 +149,6 @@ def fetch_news(cat_label: str, page_size: int = 10) -> list:
     if r.status_code == 429:
         raise ValueError("Límite de llamadas alcanzado. Inténtalo más tarde.")
     r.raise_for_status()
-
     arts = r.json().get("articles", [])
     for a in arts:
         if a.get("title") and " - " in a["title"]:
@@ -208,22 +208,25 @@ with col1:
 with col2:
     buscar = st.button("↻ BUSCAR")
 
-num_noticias = st.slider("Número de noticias", 5, 20, 10, 5)
+num_noticias    = st.slider("Número de noticias", 5, 20, 10, 5)
 traducir_activo = st.toggle("🌐 Traducir al español (Gemini)", value=True)
 
 # ── Sesión ────────────────────────────────────────────────────────────────────
-for k, v in [("articles", []), ("ultima_cat", None), ("ultima_sync", None)]:
+for k, v in [("articles", []), ("ultima_cat", None), ("ultima_sync", None), ("gemini_error", None)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
 cargar = buscar or st.session_state.ultima_cat != cat_label
 
 if cargar:
-    with st.spinner("⚡ Buscando y traduciendo noticias..."):
+    st.session_state.gemini_error = None
+    with st.spinner("⚡ Buscando noticias..."):
         try:
             arts = fetch_news(cat_label, page_size=num_noticias)
             if traducir_activo and arts:
-                arts = traducir_con_gemini(arts)
+                with st.spinner("🌐 Traduciendo con Gemini..."):
+                    arts, err = traducir_con_gemini(arts)
+                    st.session_state.gemini_error = err
             st.session_state.articles    = arts
             st.session_state.ultima_cat  = cat_label
             st.session_state.ultima_sync = datetime.now().strftime("%H:%M:%S")
@@ -233,6 +236,10 @@ if cargar:
         except Exception as e:
             st.error(f"⚠ Error: {e}")
             st.session_state.articles = []
+
+# ── Mostrar error de Gemini si lo hay ────────────────────────────────────────
+if st.session_state.gemini_error:
+    st.warning(f"⚠ Traducción fallida — {st.session_state.gemini_error}")
 
 # ── Resultados ────────────────────────────────────────────────────────────────
 articles = st.session_state.articles
