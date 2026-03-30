@@ -3,7 +3,7 @@ import requests
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 
-# ── CONFIGURACIÓN DE PÁGINA (ESTÉTICA TERMINAL) ──────────────────────────────
+# ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
 # ── CLAVES ───────────────────────────────────────────────────────────────────
@@ -47,42 +47,36 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 """, unsafe_allow_html=True)
 
 # ── DOMINIOS Y CATEGORÍAS ────────────────────────────────────────────────────
-# Priorizamos KitPloit y Packet Storm para herramientas
-DOMAINS_TOOLS = "kitploit.com,packetstormsecurity.com,toolswatch.org,sectoolmarket.com"
-DOMAINS_GENERAL = "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,darkreading.com"
+# Mezclamos dominios para asegurar que siempre haya resultados
+CYBER_DOMAINS = "kitploit.com,thehackernews.com,bleepingcomputer.com,portswigger.net,darkreading.com,packetstormsecurity.com"
 
 CATEGORIAS = {
     "◈ TODAS": "cybersecurity hacking",
     "⚠ BRECHAS": '("data breach" OR "ransomware") AND (hack OR victim)',
-    "⚙ HERRAMIENTAS": '("github" OR "repository" OR "tool") AND ("exploit" OR "scanner" OR "pentest" OR "framework" OR "script") -blog -summary -newsletter',
+    "⚙ HERRAMIENTAS": '("github" OR "tool" OR "framework") AND ("offensive" OR "pentest" OR "exploit" OR "scanner" OR "repository")',
     "☣ CVEs": "(CVE OR vulnerability OR zero-day) AND (critical OR exploit)",
-    "◉ GRUPOS APT": "(APT OR cyberespionage) AND (campaign OR targeted attack)",
+    "◉ GRUPOS APT": "(APT OR cyberespionage) AND (campaign OR attack)",
     "₿ CRYPTO": "(crypto OR DeFi OR blockchain) AND (hack OR exploit OR stolen)",
 }
 
 CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
 
-# ── LÓGICA DE TRADUCCIÓN ─────────────────────────────────────────────────────
+# ── TRADUCCIÓN ───────────────────────────────────────────────────────────────
 def traducir_articulos(articulos):
     translator = GoogleTranslator(source='en', target='es')
     for art in articulos:
         try:
-            if art.get("title"): 
-                art["title"] = translator.translate(art["title"])
-            if art.get("description"): 
-                art["description"] = translator.translate(art["description"][:400])
-        except: 
-            continue
+            if art.get("title"): art["title"] = translator.translate(art["title"])
+            if art.get("description"): art["description"] = translator.translate(art["description"][:400])
+        except: continue
     return articulos
 
-# ── BÚSQUEDA ESPECIALIZADA ──────────────────────────────────────────────────
-def fetch_news(cat_label, page_size=50):
-    selected_domains = DOMAINS_TOOLS if cat_label == "⚙ HERRAMIENTAS" else DOMAINS_GENERAL
-    
+# ── BÚSQUEDA CORREGIDA ───────────────────────────────────────────────────────
+def fetch_news(cat_label, page_size=30):
     try:
         r = requests.get("https://newsapi.org/v2/everything", params={
             "q": CATEGORIAS[cat_label],
-            "domains": selected_domains,
+            "domains": CYBER_DOMAINS,
             "language": "en",
             "pageSize": page_size,
             "apiKey": NEWSAPI_KEY,
@@ -92,20 +86,15 @@ def fetch_news(cat_label, page_size=50):
         raw_articles = r.json().get("articles", [])
         
         if cat_label == "⚙ HERRAMIENTAS":
+            # Filtro inteligente: quitamos morralla de prensa pero dejamos pasar lo técnico
+            ruido = ["newsletter", "boletín", "esta semana", "week in", "opinion", "versículo", "verso", "incident", "disponibilidad"]
             filtered = []
-            # Lista negra de palabras que indican noticias de prensa u opinión
-            press_noise = ["week in", "esta semana", "newsletter", "boletín", "summary", "resumen", "opinion", "versículo", "verso"]
-            
             for a in raw_articles:
                 title = a.get("title", "").lower()
-                desc = (a.get("description") or "").lower()
-                
-                # Solo pasa si NO contiene ruido de prensa
-                if not any(noise in title for noise in press_noise):
-                    # Forzamos a que parezca un lanzamiento técnico
-                    if any(k in (title + desc) for k in ["github", "tool", "framework", "script", "repo", "released", "scanner"]):
-                        filtered.append(a)
-            return filtered[:12]
+                # Si no tiene palabras de "columna de opinión", entra
+                if not any(word in title for word in ruido):
+                    filtered.append(a)
+            return filtered[:10]
             
         return raw_articles[:10]
     except:
@@ -113,14 +102,14 @@ def fetch_news(cat_label, page_size=50):
 
 # ── CABECERA ─────────────────────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
-st.markdown(f"<p style='text-align:center; font-size:0.65rem; color:rgba(0,255,136,0.4); letter-spacing:0.15em'>TERMINAL DE INTELIGENCIA &nbsp;·&nbsp; {datetime.now().strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align:center; font-size:0.65rem; color:rgba(0,255,136,0.4); letter-spacing:0.15em'>MONITOR DE INTELIGENCIA &nbsp;·&nbsp; {datetime.now().strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
 st.markdown("---")
 
 # ── NAVEGACIÓN ───────────────────────────────────────────────────────────────
-cat_label = st.selectbox("Categoría", list(CATEGORIAS.keys()), label_visibility="collapsed")
+cat_label = st.selectbox("Cat", list(CATEGORIAS.keys()), label_visibility="collapsed")
 
 if "ultima_cat" not in st.session_state or st.session_state.ultima_cat != cat_label:
-    with st.spinner(f"⚡ ACCEDIENDO AL SECTOR: {cat_label}..."):
+    with st.spinner(f"⚡ ESCANEANDO SECTOR: {cat_label}..."):
         arts = fetch_news(cat_label)
         if arts:
             st.session_state.articles = traducir_articulos(arts)
@@ -132,7 +121,7 @@ if "ultima_cat" not in st.session_state or st.session_state.ultima_cat != cat_la
 if "articles" in st.session_state and st.session_state.articles:
     for art in st.session_state.articles:
         title = art.get("title") or "Sin título"
-        desc = art.get("description") or "Sin descripción disponible."
+        desc = art.get("description") or "Sin descripción."
         source = art.get("source", {}).get("name", "Desconocida")
         url = art.get("url", "#")
         icon = CAT_ICONS.get(cat_label, "◈")
@@ -155,6 +144,6 @@ if "articles" in st.session_state and st.session_state.articles:
         </div>
         """, unsafe_allow_html=True)
 else:
-    st.markdown("<p style='text-align:center; opacity:0.3; margin-top:2rem;'>Escaneando utilidades técnicas...</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; opacity:0.3; margin-top:2rem;'>Buscando nuevas señales...</p>", unsafe_allow_html=True)
 
-st.markdown(f"<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>MODO HERRAMIENTA TÉCNICA ACTIVADO</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>SISTEMA ACTIVO</p>", unsafe_allow_html=True)
