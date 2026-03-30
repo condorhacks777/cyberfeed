@@ -1,21 +1,15 @@
 import streamlit as st
 import requests
-import google.generativeai as genai
-import json
-import re
 from datetime import datetime, timedelta
+from deep_translator import GoogleTranslator # Librería de traducción gratuita y estable
 
 # ── CONFIGURACIÓN ────────────────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
 # ── CLAVES ───────────────────────────────────────────────────────────────────
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
-GEMINI_KEY  = st.secrets.get("GEMINI_KEY", "AIzaSyANtAQiQg3wdvxw6XcQxOdv1cATbOvvC5w")
 
-# Configuración oficial de Google
-genai.configure(api_key=GEMINI_KEY)
-
-# ── CSS (TU ESTÉTICA ORIGINAL) ──────────────────────────────────────────────
+# ── CSS (TU ESTÉTICA ORIGINAL INTACTA) ───────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -29,44 +23,25 @@ a { color: #00ff88 !important; text-decoration: none; font-size: 0.75rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── TRADUCCIÓN CON LIBRERÍA OFICIAL (ADIÓS AL 404) ───────────────────────────
-def traducir_con_gemini(articulos):
-    if not articulos: return [], None
+# ── NUEVA LÓGICA DE TRADUCCIÓN (ESTABLE Y GRATIS) ────────────────────────────
+def traducir_articulos(articulos):
+    if not articulos: return []
     
-    try:
-        # Usamos gemini-1.5-flash-latest que es el alias más compatible
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        data_to_translate = []
-        for i, a in enumerate(articulos):
-            data_to_translate.append({
-                "id": i,
-                "t": (a.get("title") or "")[:100],
-                "d": (a.get("description") or "")[:150]
-            })
-
-        prompt = (
-            "Translate this JSON array to Spanish. Keep technical terms like CVE, Exploit, Breach. "
-            "Return ONLY the translated JSON array: "
-            f"{json.dumps(data_to_translate)}"
-        )
-
-        response = model.generate_content(prompt)
-        
-        # Limpieza de respuesta
-        raw_output = response.text
-        clean_json = re.sub(r"```json|```", "", raw_output).strip()
-        translated_data = json.loads(clean_json)
-        
-        for item in translated_data:
-            idx = item.get("id")
-            if idx is not None and idx < len(articulos):
-                articulos[idx]["title"] = item.get("t")
-                articulos[idx]["description"] = item.get("d")
-        
-        return articulos, None
-    except Exception as e:
-        return articulos, f"Error Gemini: {str(e)[:100]}"
+    translator = GoogleTranslator(source='en', target='es')
+    
+    for art in articulos:
+        try:
+            # Traducimos título y descripción por separado
+            if art.get("title"):
+                art["title"] = translator.translate(art["title"])
+            if art.get("description"):
+                # Limitamos caracteres para que no tarde mil años
+                desc = art["description"][:400] 
+                art["description"] = translator.translate(desc)
+        except Exception:
+            # Si falla la traducción de uno, seguimos con el siguiente en inglés
+            continue
+    return articulos
 
 # ── LÓGICA DE NOTICIAS ───────────────────────────────────────────────────────
 def get_news(topic):
@@ -77,8 +52,11 @@ def get_news(topic):
     }.get(topic, "cybersecurity")
 
     url = f"https://newsapi.org/v2/everything?q={q}&language=en&pageSize=8&apiKey={NEWSAPI_KEY}"
-    r = requests.get(url, timeout=10)
-    return r.json().get("articles", []) if r.status_code == 200 else []
+    try:
+        r = requests.get(url, timeout=10)
+        return r.json().get("articles", []) if r.status_code == 200 else []
+    except:
+        return []
 
 # ── INTERFAZ ─────────────────────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
@@ -88,12 +66,11 @@ with col1:
     seleccion = st.selectbox("CAT", ["◈ TODAS", "⚠ BRECHAS", "⚙ HERRAMIENTAS", "☣ CVEs", "◉ GRUPOS APT", "₿ CRYPTO"], label_visibility="collapsed")
 with col2:
     if st.button("↻ SCAN"):
-        with st.spinner("📡 SCANNING..."):
+        with st.spinner("📡 SCANNING & TRANSLATING..."):
             raw_arts = get_news(seleccion)
             if raw_arts:
-                final_arts, err = traducir_con_gemini(raw_arts)
-                if err: st.warning(err)
-                st.session_state.feed = final_arts
+                # Usamos la nueva traducción estable
+                st.session_state.feed = traducir_articulos(raw_arts)
             else:
                 st.error("No se encontraron noticias.")
 
