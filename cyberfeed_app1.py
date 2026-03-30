@@ -46,15 +46,10 @@ p, li, span, label { color: rgba(200,255,200,0.9) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── FUENTES DE INTELIGENCIA (MIX ANTI-BLOQUEO 2026) ──────────────────────────
+# ── FUENTES DE INTELIGENCIA (FILTRADAS Y ESTABLES) ──────────────────────────
 FEEDS = {
     "◈ TODAS": ["https://thehackernews.com/feeds/posts/default", "https://www.bleepingcomputer.com/feed/"],
     "⚠ BRECHAS": ["https://www.bleepingcomputer.com/feed/", "https://krebsonsecurity.com/feed/"],
-    "⚙ HERRAMIENTAS": [
-        "https://packetstormsecurity.com/feeds/public/",
-        "https://www.talosintelligence.com/reputation_center/talos_vulnerability_reports.rss",
-        "https://nakedsecurity.sophos.com/feed/"
-    ],
     "☣ CVEs": [
         "https://seclists.org/rss/fulldisclosure.rss",
         "https://packetstormsecurity.com/feeds/advisories/",
@@ -64,7 +59,7 @@ FEEDS = {
     "₿ CRYPTO": ["https://www.rekt.news/rss"]
 }
 
-CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
+CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
 
 # ── PROCESAMIENTO ───────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
@@ -72,7 +67,6 @@ def limpiar_y_traducir(texto):
     if not texto: return "Sin descripción técnica."
     clean = re.sub('<[^<]+?>', '', texto).strip()
     try:
-        # Traducción limitada a 400 caracteres para evitar errores de API
         return GoogleTranslator(source='en', target='es').translate(clean[:400])
     except:
         return clean
@@ -86,37 +80,28 @@ def fetch_intel(cat_label):
 
     for url in urls:
         try:
-            # SIMULACIÓN DE NAVEGADOR PROFESIONAL
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
             req = urllib.request.Request(url, headers=headers)
-            
             with urllib.request.urlopen(req, timeout=15) as response:
                 content = response.read()
                 feed = feedparser.parse(content)
             
-            if not feed.entries:
-                continue
-
             for entry in feed.entries[:12]:
                 title = entry.title
                 desc = entry.get("summary", entry.get("description", ""))
                 content_lower = (title + desc).lower()
                 
-                # FILTRO ESTRICTO SOLO PARA CVEs
                 if cat_label == "☣ CVEs":
                     cve_match = re.search(r'cve-\d{4}', content_lower)
-                    if cve_match:
-                        if cve_match.group().split('-')[1] not in allowed_years:
-                            continue
+                    if cve_match and cve_match.group().split('-')[1] not in allowed_years:
+                        continue
                     if not any(k in content_lower for k in ["vulnerability", "exploit", "cve-", "apple-sa-"]):
                         continue
 
                 source = url.split("//")[1].split("/")[0].replace("www.", "").upper()
                 articles.append({"title": title, "description": desc, "link": entry.link, "source": source})
-        except:
-            continue
+        except: continue
             
-    # ELIMINAR DUPLICADOS
     unique = []
     seen = set()
     for a in articles:
@@ -127,7 +112,6 @@ def fetch_intel(cat_label):
 
 # ── CABECERA BY CONDORHACKS ──────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
-
 st.markdown(f"""
 <div style='text-align:center; margin-top:-0.5rem; margin-bottom:1.5rem;'>
     <p style='font-size:0.65rem; color:rgba(0,255,136,0.6); letter-spacing:0.15em; margin:0;'>
@@ -142,7 +126,7 @@ st.markdown("---")
 
 cat_label = st.selectbox("Sector", list(FEEDS.keys()), label_visibility="collapsed")
 
-with st.spinner("Estableciendo conexión segura con el nodo..."):
+with st.spinner("Estableciendo conexión segura..."):
     results = fetch_intel(cat_label)
     if results:
         for art in results:
@@ -164,6 +148,6 @@ with st.spinner("Estableciendo conexión segura con el nodo..."):
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.error("⚠️ Nodo temporalmente fuera de línea. Intenta refrescar el sector.")
+        st.error("⚠️ El sector seleccionado no responde. Intenta refrescar el nodo.")
 
 st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.1); margin-top:4rem;'>ENCRIPTACIÓN RSA-4096 ACTIVA | RSS FEED DIRECTO | NODO ALCALÁ</p>", unsafe_allow_html=True)
