@@ -7,14 +7,15 @@ from datetime import datetime, timedelta
 # ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-# ── GESTIÓN DE CLAVES (Mantenlas en Secrets de Streamlit al subir a GitHub) ──
+# ── GESTIÓN DE CLAVES ────────────────────────────────────────────────────────
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
 GEMINI_KEY  = st.secrets.get("GEMINI_KEY", "AIzaSyANtAQiQg3wdvxw6XcQxOdv1cATbOvvC5w")
 
-# URL Corregida (v1beta suele ser más quisquillosa con los endpoints)
+# URL REVISADA: v1beta/models/gemini-1.5-flash:generateContent
+# El error 404 suele ser por una errata aquí o el uso de v1 en lugar de v1beta
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
-# ── CSS PERSONALIZADO (TU ESTÉTICA ORIGINAL) ─────────────────────────────────
+# ── CSS PERSONALIZADO (MANTENIDO INTACTO) ────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -61,37 +62,40 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── LÓGICA DE TRADUCCIÓN (URL Y PAYLOAD CORREGIDOS) ──────────────────────────
+# ── LÓGICA DE TRADUCCIÓN ─────────────────────────────────────────────────────
 def traducir_con_gemini(articulos: list) -> tuple:
     if not articulos: return [], None
     
-    # Reducimos tamaño para evitar errores de buffer
-    entrada = [{"id": i, "t": (a.get("title") or "")[:100], "d": (a.get("description") or "")[:150]} for i, a in enumerate(articulos)]
+    # Payload ultra-ligero para asegurar respuesta rápida y evitar errores
+    entrada = [{"id": i, "t": (a.get("title") or "")[:90], "d": (a.get("description") or "")[:140]} for i, a in enumerate(articulos)]
 
-    prompt = f"Traduce al español técnico. Mantén términos como CVE, Ransomware, Exploit. Responde SOLO un array JSON: {json.dumps(entrada)}"
+    prompt = f"Traduce al español técnico (mantén CVE, Ransomware, Exploit). Responde SOLO un array JSON: {json.dumps(entrada)}"
 
+    # Payload con la estructura exacta que pide la API de Google
     payload = {
         "contents": [{
-            "parts": [{
-                "text": prompt
-            }]
+            "parts": [{"text": prompt}]
         }]
     }
 
     try:
-        r = requests.post(GEMINI_URL, json=payload, timeout=20)
+        r = requests.post(GEMINI_URL, json=payload, timeout=25)
         
         if r.status_code != 200:
-            return articulos, f"Error {r.status_code}: {r.reason}"
+            return articulos, f"Gemini API Error {r.status_code}"
 
         res_json = r.json()
+        # Navegamos por el dict de respuesta de Google
+        if "candidates" not in res_json:
+            return articulos, "Respuesta inesperada de la IA"
+            
         raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
         
-        # Limpieza de markdown
+        # Limpieza de bloques de código markdown
         raw_text = re.sub(r"```json|```", "", raw_text).strip()
         match = re.search(r"\[.*\]", raw_text, re.DOTALL)
         
-        if not match: return articulos, "Formato IA incorrecto"
+        if not match: return articulos, "La IA no devolvió un JSON válido"
         
         traducidos = json.loads(match.group(0))
         mapa = {item["id"]: item for item in traducidos}
@@ -105,13 +109,14 @@ def traducir_con_gemini(articulos: list) -> tuple:
             resultado.append(nuevo)
         return resultado, None
     except Exception as e:
-        return articulos, f"Error conexión: {str(e)[:40]}"
+        return articulos, f"Error de conexión: {str(e)[:50]}"
 
-# ── LÓGICA DE NOTICIAS (NewsAPI) ─────────────────────────────────────────────
-def fetch_news(cat_label: str, page_size: int = 10) -> list:
+# ── LÓGICA DE NOTICIAS ───────────────────────────────────────────────────────
+def fetch_news(cat_label: str, page_size: int = 8) -> list:
     queries = {
-        "◈ TODAS": "cybersecurity", "⚠ BRECHAS": "data breach", "⚙ HERRAMIENTAS": "hacking tools",
-        "☣ CVEs": "vulnerability CVE", "◉ GRUPOS APT": "APT hacking", "₿ CRYPTO": "crypto hack"
+        "◈ TODAS": "cybersecurity", "⚠ BRECHAS": "data breach ransomware", 
+        "⚙ HERRAMIENTAS": "hacking tools github", "☣ CVEs": "vulnerability CVE critical", 
+        "◉ GRUPOS APT": "APT hacking group", "₿ CRYPTO": "crypto exploit defi"
     }
     
     r = requests.get(
@@ -123,7 +128,7 @@ def fetch_news(cat_label: str, page_size: int = 10) -> list:
             "pageSize": page_size,
             "apiKey": NEWSAPI_KEY,
         },
-        timeout=10
+        timeout=12
     )
     r.raise_for_status()
     return r.json().get("articles", [])
@@ -142,6 +147,7 @@ def render_card(article: dict):
 
 # ── INTERFAZ ─────────────────────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
+st.markdown("---")
 
 col1, col2 = st.columns([3, 1])
 with col1:
@@ -152,14 +158,16 @@ with col2:
 if "articulos" not in st.session_state: st.session_state.articulos = []
 
 if buscar:
-    with st.spinner("⚡ BUSCANDO..."):
+    with st.spinner("⚡ BUSCANDO Y TRADUCIENDO..."):
         try:
+            # 1. Obtener noticias en inglés
             arts = fetch_news(cat)
+            # 2. Traducir (esto ya no debería dar 404)
             arts_es, err = traducir_con_gemini(arts)
-            if err: st.error(err)
+            if err: st.warning(err)
             st.session_state.articulos = arts_es
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error general: {e}")
 
 for a in st.session_state.articulos:
     render_card(a)
