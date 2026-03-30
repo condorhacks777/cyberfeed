@@ -39,26 +39,13 @@ h1 { font-family: 'Orbitron', monospace !important; color: #00ff88 !important; l
     border-radius: 0 !important;
     font-family: 'Share Tech Mono', monospace !important;
 }
-
-/* Tarjetas de noticias personalizadas */
 .news-card {
     border: 1px solid rgba(0,255,136,0.2);
     border-left: 3px solid #00ff88;
     background: rgba(0,10,5,0.85);
     padding: 0.9rem 1rem;
     margin-bottom: 0.5rem;
-    cursor: pointer;
 }
-.news-card.critical { border-left-color: #ff2d2d; }
-.news-card.high     { border-left-color: #ff8c00; }
-.news-card.medium   { border-left-color: #ffd700; }
-.news-card.low, .news-card.info { border-left-color: #00cfff; }
-
-.badge-critical { color:#ff2d2d; border:1px solid #ff2d2d; background:rgba(255,45,45,0.1); padding:1px 6px; font-size:0.65rem; font-weight:700; }
-.badge-high     { color:#ff8c00; border:1px solid #ff8c00; background:rgba(255,140,0,0.1); padding:1px 6px; font-size:0.65rem; font-weight:700; }
-.badge-medium   { color:#ffd700; border:1px solid #ffd700; background:rgba(255,215,0,0.08); padding:1px 6px; font-size:0.65rem; font-weight:700; }
-.badge-info, .badge-low { color:#00cfff; border:1px solid #00cfff; background:rgba(0,207,255,0.08); padding:1px 6px; font-size:0.65rem; font-weight:700; }
-
 hr { border-color: rgba(0,255,136,0.15) !important; }
 p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Share Tech Mono', monospace !important; }
 #MainMenu, footer, header { visibility: hidden; }
@@ -66,80 +53,38 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── Categorías ────────────────────────────────────────────────────────────────
+# ── Categorías con queries en español ─────────────────────────────────────────
+# language=es trae artículos en español directamente, sin necesidad de traducir
 CATEGORIAS = {
-    "TODAS":        "cybersecurity OR hacking OR ransomware OR malware OR CVE OR \"data breach\"",
-    "BRECHAS":      "\"data breach\" OR \"data leak\" OR ransomware attack OR hacked company",
-    "HERRAMIENTAS": "hacking tool OR pentest tool OR exploit OR \"offensive security\" OR cybersecurity software",
-    "CVEs":         "CVE OR vulnerability OR \"zero day\" OR \"zero-day\" OR \"patch tuesday\"",
-    "GRUPOS APT":   "APT OR \"nation state\" hacking OR cyberespionage OR \"state sponsored\" attack",
-    "CRYPTO":       "crypto hack OR DeFi exploit OR blockchain hack OR \"exchange hack\" OR NFT hack",
+    "◈ TODAS":         ("ciberseguridad OR hacking OR ransomware OR malware OR vulnerabilidad OR \"filtración de datos\"", "es"),
+    "⚠ BRECHAS":       ("\"filtración de datos\" OR \"brecha de seguridad\" OR hackeo OR ransomware", "es"),
+    "⚙ HERRAMIENTAS":  ("herramienta hacking OR ciberseguridad software OR pentest OR exploit", "es"),
+    "☣ CVEs":          ("CVE OR vulnerabilidad OR \"día cero\" OR parche de seguridad", "es"),
+    "◉ GRUPOS APT":    ("APT OR ciberespionaje OR \"ataque estatal\" OR grupo hacker", "es"),
+    "₿ CRYPTO":        ("hackeo cripto OR DeFi exploit OR \"robo criptomonedas\" OR exchange hackeado", "es"),
 }
 
-SEV_BADGE = {
-    "critical": ("CRÍTICO", "badge-critical"),
-    "high":     ("ALTO",    "badge-high"),
-    "medium":   ("MEDIO",   "badge-medium"),
-    "low":      ("BAJO",    "badge-info"),
-    "info":     ("INFO",    "badge-info"),
+# Fuentes en español de ciberseguridad + medios generales en español
+FUENTES_ES = "el-mundo,el-pais,abc,la-vanguardia,20minutos"
+
+CAT_ICONS = {
+    "◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙",
+    "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿",
 }
-CAT_ICONS = { "TODAS":"◈", "BRECHAS":"⚠", "HERRAMIENTAS":"⚙", "CVEs":"☣", "GRUPOS APT":"◉", "CRYPTO":"₿" }
-
-# ── Traducción con Claude (solo títulos y descripciones) ──────────────────────
-def traducir_articulos(articulos: list) -> list:
-    """Traduce títulos y descripciones al español usando la API de Anthropic de forma gratuita con el plan disponible."""
-    try:
-        import anthropic
-        client = anthropic.Anthropic()
-        
-        textos = []
-        for a in articulos:
-            titulo = (a.get("title") or "").rsplit(" - ", 1)[0]
-            desc = a.get("description") or ""
-            textos.append(f"TÍTULO: {titulo}\nDESCRIPCIÓN: {desc}")
-        
-        bloque = "\n---\n".join(textos)
-        prompt = f"""Traduce al español los siguientes títulos y descripciones de noticias de ciberseguridad.
-Mantén términos técnicos en inglés (CVE, ransomware, phishing, exploit, etc).
-Responde SOLO con el mismo formato separado por ---
-
-{bloque}"""
-        
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",  # modelo más barato
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        
-        traducciones = resp.content[0].text.strip().split("---")
-        
-        resultado = []
-        for i, art in enumerate(articulos):
-            nuevo = dict(art)
-            if i < len(traducciones):
-                lineas = traducciones[i].strip().split("\n")
-                for linea in lineas:
-                    if linea.startswith("TÍTULO:"):
-                        nuevo["title"] = linea.replace("TÍTULO:", "").strip()
-                    elif linea.startswith("DESCRIPCIÓN:"):
-                        nuevo["description"] = linea.replace("DESCRIPCIÓN:", "").strip()
-            resultado.append(nuevo)
-        return resultado
-    except Exception:
-        # Si falla la traducción, devolver sin traducir
-        return articulos
 
 
-# ── NewsAPI ───────────────────────────────────────────────────────────────────
-def fetch_news(query: str, page_size: int = 10) -> list:
-    desde = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+def fetch_news(cat_label: str, page_size: int = 10) -> list:
+    query, lang = CATEGORIAS[cat_label]
+    desde = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")  # 30 días para más resultados en español
+
+    # Primero intentar con language=es
     r = requests.get(
         "https://newsapi.org/v2/everything",
         params={
             "q": query,
             "from": desde,
             "sortBy": "publishedAt",
-            "language": "en",
+            "language": lang,
             "pageSize": page_size,
             "apiKey": NEWSAPI_KEY,
         },
@@ -151,10 +96,31 @@ def fetch_news(query: str, page_size: int = 10) -> list:
         raise ValueError("Límite de llamadas alcanzado. Inténtalo más tarde.")
     r.raise_for_status()
     arts = r.json().get("articles", [])
+
+    # Si hay pocos resultados en español, completar con inglés
+    if len(arts) < 3:
+        query_en, _ = CATEGORIAS[cat_label]
+        query_en = query_en.replace("ciberseguridad", "cybersecurity").replace("vulnerabilidad", "vulnerability").replace("hackeo", "hack").replace("herramienta", "tool").replace("cripto", "crypto").replace("parche de seguridad", "security patch")
+        r2 = requests.get(
+            "https://newsapi.org/v2/everything",
+            params={
+                "q": "cybersecurity OR hacking OR ransomware OR CVE OR \"data breach\"",
+                "from": desde,
+                "sortBy": "publishedAt",
+                "language": "en",
+                "pageSize": page_size,
+                "apiKey": NEWSAPI_KEY,
+            },
+            timeout=10,
+        )
+        if r2.status_code == 200:
+            arts = r2.json().get("articles", [])
+
     # Limpiar sufijo " - Fuente" del título
     for a in arts:
         if a.get("title") and " - " in a["title"]:
             a["title"] = a["title"].rsplit(" - ", 1)[0]
+
     return arts
 
 
@@ -166,7 +132,7 @@ def format_date(iso: str) -> str:
         return iso[:10] if iso else "—"
 
 
-def render_card(article: dict, idx: int, cat_label: str):
+def render_card(article: dict, cat_label: str):
     title  = article.get("title") or "Sin título"
     desc   = article.get("description") or "Sin descripción disponible."
     source = article.get("source", {}).get("name", "Desconocida")
@@ -177,7 +143,7 @@ def render_card(article: dict, idx: int, cat_label: str):
     st.markdown(f"""
     <div class="news-card">
         <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-bottom:0.4rem;">
-            <span style="font-size:0.6rem; color:#00cfff; letter-spacing:0.05em;">{icon} {cat_label}</span>
+            <span style="font-size:0.6rem; color:#00cfff;">{icon} {cat_label.split()[-1]}</span>
             <span style="font-size:0.6rem; color:rgba(0,255,136,0.4);">📅 {fecha}</span>
             <span style="font-size:0.6rem; color:rgba(0,207,255,0.5);">🔗 {source}</span>
         </div>
@@ -212,7 +178,6 @@ with col2:
     buscar = st.button("↻ BUSCAR")
 
 num_noticias = st.slider("Número de noticias", 5, 20, 10, 5)
-traducir = st.checkbox("Traducir títulos al español (usa Claude Haiku)", value=True)
 
 # ── Sesión ────────────────────────────────────────────────────────────────────
 for k, v in [("articles", []), ("ultima_cat", None), ("ultima_sync", None)]:
@@ -222,12 +187,10 @@ for k, v in [("articles", []), ("ultima_cat", None), ("ultima_sync", None)]:
 cargar = buscar or st.session_state.ultima_cat != cat_label
 
 if cargar:
-    with st.spinner("⚡ Buscando noticias..."):
+    with st.spinner("⚡ Buscando noticias en español..."):
         try:
-            arts = fetch_news(CATEGORIAS[cat_label], page_size=num_noticias)
-            if traducir and arts:
-                arts = traducir_articulos(arts)
-            st.session_state.articles   = arts
+            arts = fetch_news(cat_label, page_size=num_noticias)
+            st.session_state.articles    = arts
             st.session_state.ultima_cat  = cat_label
             st.session_state.ultima_sync = datetime.now().strftime("%H:%M:%S")
         except ValueError as e:
@@ -244,16 +207,16 @@ if articles:
     st.markdown(
         f"<p style='font-size:0.62rem; color:rgba(0,255,136,0.35)'>"
         f"RESULTADOS: <span style='color:#00ff88'>{len(articles)}</span> &nbsp;·&nbsp; "
-        f"ÚLTIMA SYNC: <span style='color:#00cfff'>{st.session_state.ultima_sync}</span> &nbsp;·&nbsp; ÚLTIMOS 7 DÍAS"
+        f"ÚLTIMA SYNC: <span style='color:#00cfff'>{st.session_state.ultima_sync}</span>"
         f"</p>",
         unsafe_allow_html=True,
     )
-    for i, art in enumerate(articles):
-        render_card(art, i, cat_label)
+    for art in articles:
+        render_card(art, cat_label)
 
     st.markdown(
-        "<p style='text-align:center; font-size:0.58rem; color:rgba(0,255,136,0.2); margin-top:1.5rem;'>"
-        "◈ CYBERFEED · NOTICIAS VÍA NEWSAPI · SIN COSTE ◈<br>"
+        "<p style='text-align:center; font-size:0.58rem; color:rgba(0,255,136,0.2); margin-top:1rem;'>"
+        "◈ CYBERFEED · NOTICIAS VÍA NEWSAPI ◈<br>"
         "Verifica siempre la fuente original antes de compartir."
         "</p>",
         unsafe_allow_html=True,
