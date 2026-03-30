@@ -3,13 +3,13 @@ import requests
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 
-# ── CONFIGURACIÓN DE PÁGINA (ESTÉTICA ORIGINAL) ──────────────────────────────
+# ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
 # ── CLAVES ───────────────────────────────────────────────────────────────────
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
 
-# ── TU CSS ORIGINAL (SIN TOCAR NI UN PÍXEL) ──────────────────────────────────
+# ── TU CSS ORIGINAL (ESTÉTICA BLINDADA) ──────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -46,15 +46,15 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── DOMINIOS ESPECÍFICOS PARA CADA CATEGORÍA ─────────────────────────────────
-# Para herramientas, forzamos KitPloit y similares que son repos-orientados
-DOMAINS_TOOLS = "kitploit.com,toolswatch.org,sectoolmarket.com,github.blog,securityweek.com"
+# ── DOMINIOS ESPECÍFICOS PARA EVITAR NOTICIAS CORPORATIVAS ───────────────────
+# Quitamos github.blog porque solo trae noticias de la empresa.
+DOMAINS_TOOLS = "kitploit.com,toolswatch.org,sectoolmarket.com,packetstormsecurity.com,hackaday.com"
 DOMAINS_GENERAL = "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,darkreading.com"
 
 CATEGORIAS = {
     "◈ TODAS": "cybersecurity hacking",
     "⚠ BRECHAS": '("data breach" OR "ransomware") AND (hack OR victim)',
-    "⚙ HERRAMIENTAS": '("github" OR "repository" OR "exploit" OR "tool") AND ("release" OR "offensive" OR "scanner" OR "pentest")',
+    "⚙ HERRAMIENTAS": '("github" OR "repository") AND ("exploit" OR "pentesting" OR "red team" OR "osint" OR "scanner") -blog -availability -api -rest',
     "☣ CVEs": "(CVE OR vulnerability OR zero-day) AND (critical OR exploit)",
     "◉ GRUPOS APT": "(APT OR cyberespionage) AND (campaign OR targeted attack)",
     "₿ CRYPTO": "(crypto OR DeFi OR blockchain) AND (hack OR exploit OR stolen)",
@@ -77,7 +77,7 @@ def traducir_articulos(articulos):
 
 # ── BÚSQUEDA ESPECIALIZADA ──────────────────────────────────────────────────
 def fetch_news(cat_label, page_size=40):
-    # Si buscamos herramientas, usamos los dominios de herramientas
+    # Si buscamos herramientas, usamos dominios de repositorios y blogs técnicos
     selected_domains = DOMAINS_TOOLS if cat_label == "⚙ HERRAMIENTAS" else DOMAINS_GENERAL
     
     try:
@@ -93,13 +93,16 @@ def fetch_news(cat_label, page_size=40):
         raw_articles = r.json().get("articles", [])
         
         if cat_label == "⚙ HERRAMIENTAS":
-            # Filtro para asegurar que hablen de un lanzamiento o repo de Github
             filtered = []
+            # Palabras que indican que es una noticia corporativa de GitHub (RUIDO)
+            noise_words = ["availability", "rest api", "company", "enterprise", "incidents", "blog", "stability"]
+            
             for a in raw_articles:
                 text = (a.get("title", "") + " " + (a.get("description") or "")).lower()
-                # Priorizamos lo que mencione código o herramientas ofensivas
-                if any(k in text for k in ["github", "tool", "framework", "script", "repo", "exploit"]):
-                    if not any(noise in text for noise in ["arrested", "policy", "lawsuit", "victim"]):
+                # 1. No debe tener palabras de ruido corporativo
+                # 2. Debe sonar a herramienta real (github, exploit, framework...)
+                if not any(noise in text for noise in noise_words):
+                    if any(k in text for k in ["github", "tool", "framework", "script", "repo", "exploit", "scanner"]):
                         filtered.append(a)
             return filtered[:12]
             
@@ -153,4 +156,4 @@ if "articles" in st.session_state and st.session_state.articles:
 else:
     st.markdown("<p style='text-align:center; opacity:0.3; margin-top:2rem;'>Escaneando nuevas utilidades...</p>", unsafe_allow_html=True)
 
-st.markdown(f"<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>INTELIGENCIA DE CÓDIGO ABIERTO (OSINT) ACTIVA</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>PROTOCOLO DE FILTRADO DE HERRAMIENTAS v4.0 ACTIVO</p>", unsafe_allow_html=True)
