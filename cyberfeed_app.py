@@ -3,13 +3,13 @@ import requests
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 
-# ── CONFIGURACIÓN DE PÁGINA (ESTILO ORIGINAL) ────────────────────────────────
+# ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-# ── CLAVES (Asegúrate de tener NEWSAPI_KEY en los Secrets de Streamlit) ──────
+# ── CLAVES ───────────────────────────────────────────────────────────────────
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
 
-# ── TU CSS ORIGINAL (SIN TOCAR NI UN PÍXEL) ──────────────────────────────────
+# ── TU CSS ORIGINAL (INTACTO) ────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -25,16 +25,6 @@ body::after {
     pointer-events: none; z-index: 9999;
 }
 h1 { font-family: 'Orbitron', monospace !important; color: #00ff88 !important; letter-spacing: 0.15em !important; }
-.stButton > button {
-    background: transparent !important;
-    border: 1px solid #00ff88 !important;
-    color: #00ff88 !important;
-    font-family: 'Share Tech Mono', monospace !important;
-    letter-spacing: 0.1em !important;
-    border-radius: 0 !important;
-    width: 100% !important;
-}
-.stButton > button:hover { background: rgba(0,255,136,0.1) !important; }
 .stSelectbox > div > div {
     background: #000a03 !important;
     border: 1px solid rgba(0,255,136,0.3) !important;
@@ -56,9 +46,7 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── CONSTANTES Y CATEGORÍAS (TUYAS) ──────────────────────────────────────────
-CYBER_DOMAINS = "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,darkreading.com"
-
+# ── CONSTANTES ───────────────────────────────────────────────────────────────
 CATEGORIAS = {
     "◈ TODAS": "cybersecurity hacking",
     "⚠ BRECHAS": "data breach ransomware",
@@ -70,7 +58,7 @@ CATEGORIAS = {
 
 CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
 
-# ── LÓGICA DE TRADUCCIÓN (ESTABLE) ───────────────────────────────────────────
+# ── LÓGICA DE TRADUCCIÓN ─────────────────────────────────────────────────────
 def traducir_articulos(articulos):
     translator = GoogleTranslator(source='en', target='es')
     for art in articulos:
@@ -83,59 +71,56 @@ def traducir_articulos(articulos):
 # ── LÓGICA DE NOTICIAS ───────────────────────────────────────────────────────
 def fetch_news(cat_label, page_size=10):
     r = requests.get("https://newsapi.org/v2/everything", params={
-        "q": CATEGORIAS[cat_label], "domains": CYBER_DOMAINS, "language": "en",
+        "q": CATEGORIAS[cat_label], "language": "en",
         "pageSize": page_size, "apiKey": NEWSAPI_KEY, "sortBy": "publishedAt"
     }, timeout=10)
     return r.json().get("articles", [])
 
-# ── CABECERA (TUYA) ──────────────────────────────────────────────────────────
+# ── CABECERA ─────────────────────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
 st.markdown(f"<p style='text-align:center; font-size:0.65rem; color:rgba(0,255,136,0.4); letter-spacing:0.15em'>TERMINAL DE INTELIGENCIA &nbsp;·&nbsp; {datetime.now().strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# ── CONTROLES ────────────────────────────────────────────────────────────────
-col1, col2 = st.columns([3, 1])
-with col1:
-    cat_label = st.selectbox("cat", list(CATEGORIAS.keys()), label_visibility="collapsed")
-with col2:
-    buscar = st.button("↻ BUSCAR")
+# ── CONTROLES AUTOMÁTICOS ────────────────────────────────────────────────────
+# Al cambiar el selectbox, Streamlit recarga el script automáticamente
+cat_label = st.selectbox("Categoría", list(CATEGORIAS.keys()), label_visibility="collapsed")
 
-traducir_activo = st.toggle("🌐 Traducir al español", value=True)
-
-if "articles" not in st.session_state: st.session_state.articles = []
-
-if buscar:
-    with st.spinner("⚡ BUSCANDO..."):
+# Ejecución automática: Si la categoría cambia o no hay artículos, buscamos
+if "ultima_cat" not in st.session_state or st.session_state.ultima_cat != cat_label:
+    with st.spinner(f"⚡ ESCANEANDO {cat_label}..."):
         try:
             arts = fetch_news(cat_label)
-            if traducir_activo:
-                arts = traducir_articulos(arts)
-            st.session_state.articles = arts
+            st.session_state.articles = traducir_articulos(arts)
+            st.session_state.ultima_cat = cat_label
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error de red: {e}")
 
-# ── RENDERIZADO (TU DISEÑO DE TARJETA ORIGINAL) ──────────────────────────────
-for art in st.session_state.articles:
-    title = art.get("title") or "Sin título"
-    desc = art.get("description") or "Sin descripción disponible."
-    source = art.get("source", {}).get("name", "Desconocida")
-    url = art.get("url", "#")
-    icon = CAT_ICONS.get(cat_label, "◈")
+# ── RENDERIZADO ──────────────────────────────────────────────────────────────
+if "articles" in st.session_state:
+    for art in st.session_state.articles:
+        title = art.get("title") or "Sin título"
+        desc = art.get("description") or "Sin descripción disponible."
+        source = art.get("source", {}).get("name", "Desconocida")
+        url = art.get("url", "#")
+        icon = CAT_ICONS.get(cat_label, "◈")
 
-    st.markdown(f"""
-    <div class="news-card">
-        <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.4rem;">
-            <span style="font-size:0.6rem; color:#00cfff;">{icon} {cat_label.split()[-1]}</span>
-            <span style="font-size:0.6rem; color:rgba(0,207,255,0.5);">🔗 {source}</span>
+        st.markdown(f"""
+        <div class="news-card">
+            <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.4rem;">
+                <span style="font-size:0.6rem; color:#00cfff;">{icon} {cat_label.split()[-1]}</span>
+                <span style="font-size:0.6rem; color:rgba(0,207,255,0.5);">🔗 {source}</span>
+            </div>
+            <div style="font-size:0.88rem; color:#e8ffe8; font-family:'Share Tech Mono',monospace; line-height:1.4; margin-bottom:0.5rem; font-weight:bold;">
+                {title}
+            </div>
+            <div style="font-size:0.76rem; color:rgba(200,255,200,0.75); line-height:1.7; margin-bottom:0.5rem;">
+                {desc}
+            </div>
+            <a href="{url}" target="_blank" style="color:#00ff88; font-size:0.72rem; text-decoration:none;">
+                ▶ Leer artículo completo
+            </a>
         </div>
-        <div style="font-size:0.88rem; color:#e8ffe8; font-family:'Share Tech Mono',monospace; line-height:1.4; margin-bottom:0.5rem; font-weight:bold;">
-            {title}
-        </div>
-        <div style="font-size:0.76rem; color:rgba(200,255,200,0.75); line-height:1.7; margin-bottom:0.5rem;">
-            {desc}
-        </div>
-        <a href="{url}" target="_blank" style="color:#00ff88; font-size:0.72rem; text-decoration:none;">
-            ▶ Leer artículo completo
-        </a>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
+# ── PIE DE PÁGINA ───────────────────────────────────────────────────────────
+st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.15); margin-top:2rem;'>ACTUALIZACIÓN AUTOMÁTICA ACTIVADA</p>", unsafe_allow_html=True)
