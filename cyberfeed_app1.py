@@ -3,6 +3,7 @@ import feedparser
 import re
 import urllib.request
 from datetime import datetime
+import pytz
 from deep_translator import GoogleTranslator
 
 # ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
@@ -46,7 +47,7 @@ p, li, span, label { color: rgba(200,255,200,0.9) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── FUENTES DE INTELIGENCIA (FILTRADAS Y ESTABLES) ──────────────────────────
+# ── FUENTES DE INTELIGENCIA SELECCIONADAS ────────────────────────────────────
 FEEDS = {
     "◈ TODAS": ["https://thehackernews.com/feeds/posts/default", "https://www.bleepingcomputer.com/feed/"],
     "⚠ BRECHAS": ["https://www.bleepingcomputer.com/feed/", "https://krebsonsecurity.com/feed/"],
@@ -61,10 +62,10 @@ FEEDS = {
 
 CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
 
-# ── PROCESAMIENTO ───────────────────────────────────────────────────────────
+# ── PROCESAMIENTO TÉCNICO ────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
 def limpiar_y_traducir(texto):
-    if not texto: return "Sin descripción técnica."
+    if not texto: return "Sin descripción técnica disponible."
     clean = re.sub('<[^<]+?>', '', texto).strip()
     try:
         return GoogleTranslator(source='en', target='es').translate(clean[:400])
@@ -74,6 +75,8 @@ def limpiar_y_traducir(texto):
 def fetch_intel(cat_label):
     articles = []
     urls = FEEDS.get(cat_label, [])
+    
+    # Filtro de tiempo para CVEs (2025-2026)
     current_year = str(datetime.now().year)
     prev_year = str(datetime.now().year - 1)
     allowed_years = [current_year, prev_year]
@@ -91,6 +94,7 @@ def fetch_intel(cat_label):
                 desc = entry.get("summary", entry.get("description", ""))
                 content_lower = (title + desc).lower()
                 
+                # Filtrado específico para CVEs
                 if cat_label == "☣ CVEs":
                     cve_match = re.search(r'cve-\d{4}', content_lower)
                     if cve_match and cve_match.group().split('-')[1] not in allowed_years:
@@ -100,7 +104,8 @@ def fetch_intel(cat_label):
 
                 source = url.split("//")[1].split("/")[0].replace("www.", "").upper()
                 articles.append({"title": title, "description": desc, "link": entry.link, "source": source})
-        except: continue
+        except:
+            continue
             
     unique = []
     seen = set()
@@ -110,12 +115,17 @@ def fetch_intel(cat_label):
             seen.add(a['title'].lower())
     return unique[:12]
 
-# ── CABECERA BY CONDORHACKS ──────────────────────────────────────────────────
+# ── CABECERA BY CONDORHACKS (SINCRONIZACIÓN ALCALÁ) ──────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
+
+# Ajuste de zona horaria a España (Madrid/Alcalá)
+madrid_tz = pytz.timezone('Europe/Madrid')
+hora_local = datetime.now(madrid_tz).strftime('%H:%M')
+
 st.markdown(f"""
 <div style='text-align:center; margin-top:-0.5rem; margin-bottom:1.5rem;'>
     <p style='font-size:0.65rem; color:rgba(0,255,136,0.6); letter-spacing:0.15em; margin:0;'>
-        INTEL ACTUALIZADA · {datetime.now().strftime('%H:%M')}
+        INTEL ACTUALIZADA · {hora_local}
     </p>
     <p style='font-size:0.55rem; color:rgba(0,255,136,0.25); letter-spacing:0.25em; font-style:italic; margin-top:0.3rem; text-transform:uppercase;'>
         by condorhacks
@@ -124,9 +134,10 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 st.markdown("---")
 
+# ── SELECTOR DE SECTOR ──────────────────────────────────────────────────────
 cat_label = st.selectbox("Sector", list(FEEDS.keys()), label_visibility="collapsed")
 
-with st.spinner("Estableciendo conexión segura..."):
+with st.spinner("Estableciendo conexión segura con el nodo..."):
     results = fetch_intel(cat_label)
     if results:
         for art in results:
