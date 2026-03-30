@@ -53,7 +53,6 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 """, unsafe_allow_html=True)
 
 # ── Fuentes especializadas en ciberseguridad ──────────────────────────────────
-# Solo medios 100% de ciberseguridad/tecnología — sin medios generalistas
 CYBER_DOMAINS = (
     "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,"
     "threatpost.com,darkreading.com,securityweek.com,"
@@ -62,14 +61,13 @@ CYBER_DOMAINS = (
     "github.blog,offensive-security.com,kitploit.com"
 )
 
-# ── Queries estrictamente técnicas por categoría ──────────────────────────────
 CATEGORIAS = {
-    "◈ TODAS":         "cybersecurity hacking (breach OR ransomware OR malware OR CVE OR exploit OR vulnerability)",
-    "⚠ BRECHAS":       "(\"data breach\" OR \"data leak\" OR ransomware) (company OR hospital OR government OR million records)",
-    "⚙ HERRAMIENTAS":  "(\"new tool\" OR \"open source tool\" OR \"released\" OR \"github\" OR \"framework\") (pentest OR \"red team\" OR \"offensive security\" OR \"security tool\" OR \"hacking tool\" OR nmap OR metasploit OR burpsuite OR wireshark)",
-    "☣ CVEs":          "(CVE OR vulnerability OR \"zero-day\" OR \"patch tuesday\") (critical OR high severity OR CVSS)",
-    "◉ GRUPOS APT":    "(APT OR \"nation state\" OR \"state sponsored\") (hacking OR cyberespionage OR campaign OR attack)",
-    "₿ CRYPTO":        "(crypto OR DeFi OR blockchain OR NFT OR exchange) (hack OR exploit OR stolen OR breach OR million)",
+    "◈ TODAS":        "cybersecurity hacking (breach OR ransomware OR malware OR CVE OR exploit OR vulnerability)",
+    "⚠ BRECHAS":      "(\"data breach\" OR \"data leak\" OR ransomware) (company OR hospital OR government OR million records)",
+    "⚙ HERRAMIENTAS": "(\"new tool\" OR \"open source\" OR \"released\" OR \"github\" OR \"framework\") (pentest OR \"red team\" OR \"offensive security\" OR \"security tool\" OR \"hacking tool\" OR nmap OR metasploit OR burpsuite OR wireshark)",
+    "☣ CVEs":         "(CVE OR vulnerability OR \"zero-day\" OR \"patch tuesday\") (critical OR high severity OR CVSS)",
+    "◉ GRUPOS APT":   "(APT OR \"nation state\" OR \"state sponsored\") (hacking OR cyberespionage OR campaign OR attack)",
+    "₿ CRYPTO":       "(crypto OR DeFi OR blockchain OR NFT OR exchange) (hack OR exploit OR stolen OR breach OR million)",
 }
 
 CAT_ICONS = {
@@ -77,26 +75,64 @@ CAT_ICONS = {
     "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿",
 }
 
-# ── Traducción gratuita con MyMemory API (sin key) ───────────────────────────
-def traducir(texto: str) -> str:
-    """Traduce inglés→español usando MyMemory (gratis, sin API key, 5000 chars/día)."""
-    if not texto or len(texto) < 5:
-        return texto
-    try:
-        r = requests.get(
-            "https://api.mymemory.translated.net/get",
-            params={"q": texto[:500], "langpair": "en|es"},
-            timeout=5,
-        )
-        if r.status_code == 200:
-            data = r.json()
-            traduccion = data.get("responseData", {}).get("translatedText", "")
-            # MyMemory devuelve el original si falla
-            if traduccion and traduccion.upper() != texto.upper():
-                return traduccion
-    except Exception:
-        pass
-    return texto
+# ── Traducción en lote: UNA sola petición para todos los artículos ────────────
+SEP = " <<|>> "
+SPLIT = " [[D]] "
+
+def traducir_lote(articulos: list) -> list:
+    """
+    Concatena todos los títulos y descripciones en un único texto
+    y hace UNA sola llamada a MyMemory. Así no se agota el límite diario.
+    """
+    # Construir bloque único
+    fragmentos = []
+    for a in articulos:
+        t = (a.get("title") or "").strip()[:120]
+        d = (a.get("description") or "").strip()[:180]
+        fragmentos.append(f"{t}{SPLIT}{d}")
+
+    bloque = SEP.join(fragmentos)
+
+    # MyMemory permite hasta 500 chars por petición en el plan gratuito sin key
+    # Si el bloque es muy largo, dividimos en dos llamadas
+    mitad = len(fragmentos) // 2
+    bloques = []
+    if len(bloque) <= 490:
+        bloques = [fragmentos]
+    else:
+        bloques = [fragmentos[:mitad], fragmentos[mitad:]]
+
+    traducidos = []
+    for grupo in bloques:
+        texto = SEP.join(grupo)[:490]
+        try:
+            r = requests.get(
+                "https://api.mymemory.translated.net/get",
+                params={"q": texto, "langpair": "en|es"},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                t_texto = r.json().get("responseData", {}).get("translatedText", "")
+                partes = t_texto.split(SEP)
+                traducidos.extend(partes)
+            else:
+                traducidos.extend(grupo)  # fallback: texto original
+        except Exception:
+            traducidos.extend(grupo)
+
+    # Reconstruir artículos con textos traducidos
+    resultado = []
+    for i, art in enumerate(articulos):
+        nuevo = dict(art)
+        if i < len(traducidos):
+            segs = traducidos[i].split(SPLIT)
+            if len(segs) >= 2:
+                nuevo["title"]       = segs[0].strip()
+                nuevo["description"] = segs[1].strip()
+            elif len(segs) == 1:
+                nuevo["title"] = segs[0].strip()
+        resultado.append(nuevo)
+    return resultado
 
 
 # ── NewsAPI ───────────────────────────────────────────────────────────────────
@@ -108,7 +144,7 @@ def fetch_news(cat_label: str, page_size: int = 10) -> list:
         "https://newsapi.org/v2/everything",
         params={
             "q": query,
-            "domains": CYBER_DOMAINS,   # Solo fuentes especializadas en cyber
+            "domains": CYBER_DOMAINS,
             "from": desde,
             "sortBy": "publishedAt",
             "language": "en",
@@ -124,12 +160,9 @@ def fetch_news(cat_label: str, page_size: int = 10) -> list:
     r.raise_for_status()
 
     arts = r.json().get("articles", [])
-
-    # Limpiar sufijo " - Fuente"
     for a in arts:
         if a.get("title") and " - " in a["title"]:
             a["title"] = a["title"].rsplit(" - ", 1)[0]
-
     return arts
 
 
@@ -141,17 +174,13 @@ def format_date(iso: str) -> str:
         return iso[:10] if iso else "—"
 
 
-def render_card(article: dict, cat_label: str, traducir_texto: bool):
+def render_card(article: dict, cat_label: str):
     title  = article.get("title") or "Sin título"
     desc   = article.get("description") or "Sin descripción disponible."
     source = article.get("source", {}).get("name", "Desconocida")
     url    = article.get("url", "#")
     fecha  = format_date(article.get("publishedAt", ""))
     icon   = CAT_ICONS.get(cat_label, "◈")
-
-    if traducir_texto:
-        title = traducir(title)
-        desc  = traducir(desc)
 
     st.markdown(f"""
     <div class="news-card">
@@ -204,6 +233,8 @@ if cargar:
     with st.spinner("⚡ Buscando noticias de ciberseguridad..."):
         try:
             arts = fetch_news(cat_label, page_size=num_noticias)
+            if traducir_activo and arts:
+                arts = traducir_lote(arts)
             st.session_state.articles    = arts
             st.session_state.ultima_cat  = cat_label
             st.session_state.ultima_sync = datetime.now().strftime("%H:%M:%S")
@@ -225,15 +256,12 @@ if articles:
         f"</p>",
         unsafe_allow_html=True,
     )
-    if traducir_activo:
-        st.info("⏳ Traduciendo noticias al español... puede tardar unos segundos.")
-
     for art in articles:
-        render_card(art, cat_label, traducir_activo)
+        render_card(art, cat_label)
 
     st.markdown(
         "<p style='text-align:center; font-size:0.58rem; color:rgba(0,255,136,0.2); margin-top:1rem;'>"
-        "◈ CYBERFEED · FUENTES: THEHACKERNEWS · BLEEPINGCOMPUTER · KREBSONSECURITY · Y MÁS ◈"
+        "◈ CYBERFEED · THEHACKERNEWS · BLEEPINGCOMPUTER · KREBSONSECURITY · Y MÁS ◈"
         "</p>",
         unsafe_allow_html=True,
     )
