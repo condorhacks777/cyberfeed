@@ -1,21 +1,21 @@
 import streamlit as st
 import requests
+import google.generativeai as genai
 import json
 import re
 from datetime import datetime, timedelta
 
-# ── CONFIGURACIÓN DE PÁGINA ──────────────────────────────────────────────────
+# ── CONFIGURACIÓN ────────────────────────────────────────────────────────────
 st.set_page_config(page_title="CyberFeed", page_icon="🛡️", layout="centered", initial_sidebar_state="collapsed")
 
-# ── CREDENCIALES (Asegúrate de que GEMINI_KEY sea correcta) ──────────────────
+# ── CLAVES ───────────────────────────────────────────────────────────────────
 NEWSAPI_KEY = st.secrets.get("NEWSAPI_KEY", "51214314c9a148fa9cf8ee9d69771431")
 GEMINI_KEY  = st.secrets.get("GEMINI_KEY", "AIzaSyANtAQiQg3wdvxw6XcQxOdv1cATbOvvC5w")
 
-# URL CAMBIADA A v1 (Más estable que v1beta para evitar 404)
-# Y usamos gemini-1.5-flash que es el estándar de producción.
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+# Configuración oficial de Google
+genai.configure(api_key=GEMINI_KEY)
 
-# ── CSS (TU ESTÉTICA MANTENIDA) ──────────────────────────────────────────────
+# ── CSS (TU ESTÉTICA ORIGINAL) ──────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -29,64 +29,47 @@ a { color: #00ff88 !important; text-decoration: none; font-size: 0.75rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── MOTOR DE TRADUCCIÓN (BLINDADO) ───────────────────────────────────────────
+# ── TRADUCCIÓN CON LIBRERÍA OFICIAL (ADIÓS AL 404) ───────────────────────────
 def traducir_con_gemini(articulos):
     if not articulos: return [], None
     
-    # Simplificamos al máximo el objeto para no confundir a la IA
-    data_to_translate = []
-    for i, a in enumerate(articulos):
-        data_to_translate.append({
-            "i": i,
-            "t": (a.get("title") or "")[:100],
-            "d": (a.get("description") or "")[:150]
-        })
-
-    # Prompt directo sin rodeos
-    prompt_text = (
-        "Translate this JSON array to Spanish. Keep technical terms like CVE, Exploit, Breach. "
-        "Return ONLY the translated JSON array, no conversational text: "
-        f"{json.dumps(data_to_translate)}"
-    )
-
-    payload = {
-        "contents": [{"parts": [{"text": prompt_text}]}]
-    }
-
     try:
-        # Petición con manejo de errores explícito
-        response = requests.post(GEMINI_URL, json=payload, timeout=30)
+        # Usamos gemini-1.5-flash-latest que es el alias más compatible
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        if response.status_code != 200:
-            # Si da 404 aquí, es que el modelo gemini-1.5-flash no está activo en tu cuenta o región.
-            return articulos, f"Error {response.status_code}: {response.text[:100]}"
+        data_to_translate = []
+        for i, a in enumerate(articulos):
+            data_to_translate.append({
+                "id": i,
+                "t": (a.get("title") or "")[:100],
+                "d": (a.get("description") or "")[:150]
+            })
 
-        res_data = response.json()
+        prompt = (
+            "Translate this JSON array to Spanish. Keep technical terms like CVE, Exploit, Breach. "
+            "Return ONLY the translated JSON array: "
+            f"{json.dumps(data_to_translate)}"
+        )
+
+        response = model.generate_content(prompt)
         
-        # Extraer el texto de la respuesta de Google
-        try:
-            raw_output = res_data['candidates'][0]['content']['parts'][0]['text']
-            # Limpiar posibles backticks de markdown
-            clean_json = re.sub(r"```json|```", "", raw_output).strip()
-            translated_data = json.loads(clean_json)
-            
-            # Mapear de vuelta a los artículos originales
-            for item in translated_data:
-                idx = item.get("i")
-                if idx is not None and idx < len(articulos):
-                    articulos[idx]["title"] = item.get("t")
-                    articulos[idx]["description"] = item.get("d")
-            
-            return articulos, None
-        except (KeyError, IndexError, json.JSONDecodeError):
-            return articulos, "La IA respondió pero el formato falló."
-
+        # Limpieza de respuesta
+        raw_output = response.text
+        clean_json = re.sub(r"```json|```", "", raw_output).strip()
+        translated_data = json.loads(clean_json)
+        
+        for item in translated_data:
+            idx = item.get("id")
+            if idx is not None and idx < len(articulos):
+                articulos[idx]["title"] = item.get("t")
+                articulos[idx]["description"] = item.get("d")
+        
+        return articulos, None
     except Exception as e:
-        return articulos, f"Error de red: {str(e)[:50]}"
+        return articulos, f"Error Gemini: {str(e)[:100]}"
 
 # ── LÓGICA DE NOTICIAS ───────────────────────────────────────────────────────
 def get_news(topic):
-    # Diccionario de búsqueda simplificado para evitar errores de NewsAPI
     q = {
         "◈ TODAS": "cybersecurity", "⚠ BRECHAS": "data breach", 
         "⚙ HERRAMIENTAS": "hacking tools", "☣ CVEs": "vulnerability CVE", 
@@ -95,8 +78,7 @@ def get_news(topic):
 
     url = f"https://newsapi.org/v2/everything?q={q}&language=en&pageSize=8&apiKey={NEWSAPI_KEY}"
     r = requests.get(url, timeout=10)
-    if r.status_code != 200: return []
-    return r.json().get("articles", [])
+    return r.json().get("articles", []) if r.status_code == 200 else []
 
 # ── INTERFAZ ─────────────────────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
@@ -109,7 +91,6 @@ with col2:
         with st.spinner("📡 SCANNING..."):
             raw_arts = get_news(seleccion)
             if raw_arts:
-                # Traducir
                 final_arts, err = traducir_con_gemini(raw_arts)
                 if err: st.warning(err)
                 st.session_state.feed = final_arts
