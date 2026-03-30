@@ -1,6 +1,7 @@
 import streamlit as st
 import feedparser
 import re
+import urllib.request
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
@@ -35,9 +36,7 @@ h1 { font-family: 'Orbitron', monospace !important; color: #00ff88 !important; l
     background: rgba(0,20,10,0.85);
     padding: 1.2rem;
     margin-bottom: 1rem;
-    transition: all 0.3s ease;
 }
-.news-card:hover { border-color: #ffffff; background: rgba(0,40,20,0.9); transform: translateX(5px); }
 hr { border-color: rgba(0,255,136,0.2) !important; }
 p, li, span, label { color: rgba(200,255,200,0.9) !important; }
 #MainMenu, footer, header { visibility: hidden; }
@@ -62,7 +61,7 @@ FEEDS = {
 CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
 
 # ── PROCESAMIENTO ───────────────────────────────────────────────────────────
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=600)
 def limpiar_y_traducir(texto):
     if not texto: return "Sin descripción técnica."
     clean = re.sub('<[^<]+?>', '', texto).strip()
@@ -75,36 +74,38 @@ def fetch_intel(cat_label):
     articles = []
     urls = FEEDS.get(cat_label, [])
     
-    # Filtros de año solo para CVEs
+    # Filtros de año para CVEs
     current_year = str(datetime.now().year)
     prev_year = str(datetime.now().year - 1)
     allowed_years = [current_year, prev_year]
 
     for url in urls:
         try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:20]:
+            # --- CAMBIO CLAVE: Simular Navegador ---
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                content = response.read()
+                feed = feedparser.parse(content)
+            
+            for entry in feed.entries[:15]:
                 title = entry.title
                 desc = entry.get("summary", entry.get("description", ""))
                 content_lower = (title + desc).lower()
                 
-                # --- LÓGICA DE FILTRADO ---
                 if cat_label == "☣ CVEs":
-                    # Filtro estricto por año solo en CVEs
                     cve_match = re.search(r'cve-\d{4}', content_lower)
                     if cve_match:
                         found_year = cve_match.group().split('-')[1]
                         if found_year not in allowed_years:
                             continue
-                    
                     tech_keywords = ["vulnerability", "exploit", "cve-", "apple-sa-", "security advisory"]
                     if not any(k in content_lower for k in tech_keywords):
                         continue
                 
-                # Para el resto (HERRAMIENTAS, etc.), no filtramos por año
                 source = url.split("//")[1].split("/")[0].replace("www.", "").upper()
                 articles.append({"title": title, "description": desc, "link": entry.link, "source": source})
-        except: continue
+        except Exception as e:
+            continue # Si un feed falla, pasamos al siguiente
             
     unique = []
     seen = set()
@@ -130,7 +131,7 @@ st.markdown("---")
 
 cat_label = st.selectbox("Sector", list(FEEDS.keys()), label_visibility="collapsed")
 
-with st.spinner("Sincronizando con el satélite..."):
+with st.spinner("Estableciendo conexión segura..."):
     results = fetch_intel(cat_label)
     if results:
         for art in results:
@@ -152,6 +153,6 @@ with st.spinner("Sincronizando con el satélite..."):
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.error("⚠️ Sin señales en este sector. Intenta refrescar el nodo.")
+        st.error("⚠️ El nodo de herramientas está bajo mantenimiento o bloqueado. Intenta refrescar.")
 
 st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.1); margin-top:4rem;'>ENCRIPTACIÓN RSA-4096 ACTIVA | RSS FEED DIRECTO | NODO ALCALÁ</p>", unsafe_allow_html=True)
