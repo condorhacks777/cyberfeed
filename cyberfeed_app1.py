@@ -47,78 +47,118 @@ p, li, span, label { color: rgba(200,255,200,0.9) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── FUENTES DE INTELIGENCIA SELECCIONADAS ────────────────────────────────────
+# ── FUENTES RSS POR CATEGORÍA ─────────────────────────────────────────────────
 FEEDS = {
-    "◈ TODAS": ["https://thehackernews.com/feeds/posts/default", "https://www.bleepingcomputer.com/feed/"],
-    "⚠ BRECHAS": ["https://www.bleepingcomputer.com/feed/", "https://krebsonsecurity.com/feed/"],
-    "☣ CVEs": [
-        "https://seclists.org/rss/fulldisclosure.rss",
-        "https://packetstormsecurity.com/feeds/advisories/",
-        "https://www.vulnerability-lab.com/rss/rss.php"
+    "◈ TODAS": [
+        "https://feeds.feedburner.com/TheHackersNews",          # The Hacker News
+        "https://www.bleepingcomputer.com/feed/",               # Bleeping Computer
     ],
-    "◉ GRUPOS APT": ["https://thehackernews.com/search/label/APT", "https://www.mandiant.com/resources/blog/rss.xml"],
-    "₿ CRYPTO": ["https://www.rekt.news/rss"]
+    "⚠ BRECHAS": [
+        "https://www.bleepingcomputer.com/feed/",               # Bleeping Computer
+        "https://krebsonsecurity.com/feed/",                    # Krebs on Security
+        "https://hackread.com/feed/",                           # HackRead
+    ],
+    "⚙ HERRAMIENTAS": [
+        "https://www.kitploit.com/feeds/posts/default",         # KitPloit — herramientas hacking
+        "https://blog.rapid7.com/rss/",                        # Rapid7 — releases y tools
+        "https://www.rcesecurity.com/feed/",                   # RCE Security — exploits y tools
+        "https://feeds.feedburner.com/TheHackersNews",          # THN — sección tools
+    ],
+    "☣ CVEs": [
+        "https://www.cisa.gov/cybersecurity-advisories/all.xml",# CISA advisories oficiales
+        "https://blog.rapid7.com/rss/",                        # Rapid7 vuln research
+        "https://packetstormsecurity.com/feeds/advisories/",   # Packet Storm advisories
+    ],
+    "◉ GRUPOS APT": [
+        "https://feeds.feedburner.com/TheHackersNews",
+        "https://www.mandiant.com/resources/blog/rss.xml",     # Mandiant threat intel
+        "https://cyble.com/feed/",                             # Cyble threat intel
+    ],
+    "₿ CRYPTO": [
+        "https://rekt.news/rss/feed.xml",                      # Rekt News — DeFi hacks
+        "https://protos.com/feed/",                            # Protos — crypto security
+        "https://hackread.com/feed/",                          # HackRead — crypto hacks
+    ],
 }
 
-CAT_ICONS = {"◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"}
+# Keywords de filtrado por categoría para evitar noticias irrelevantes
+FILTROS = {
+    "◈ TODAS":        ["hack", "breach", "malware", "ransomware", "vulnerability", "exploit", "cve", "attack", "cyber"],
+    "⚠ BRECHAS":      ["breach", "leak", "hack", "ransomware", "stolen", "exposed", "million records", "data"],
+    "⚙ HERRAMIENTAS": ["tool", "framework", "exploit", "release", "github", "pentest", "scanner", "payload", "script", "offensive", "red team"],
+    "☣ CVEs":         ["cve", "vulnerability", "patch", "advisory", "zero-day", "rce", "exploit", "critical", "severity"],
+    "◉ GRUPOS APT":   ["apt", "nation", "state", "espionage", "campaign", "actor", "group", "attack", "threat"],
+    "₿ CRYPTO":       ["crypto", "defi", "blockchain", "hack", "exploit", "stolen", "web3", "nft", "exchange", "rekt", "million"],
+}
 
-# ── PROCESAMIENTO TÉCNICO ────────────────────────────────────────────────────
-@st.cache_data(ttl=600)
-def limpiar_y_traducir(texto):
-    if not texto: return "Sin descripción técnica disponible."
-    clean = re.sub('<[^<]+?>', '', texto).strip()
+CAT_ICONS = {
+    "◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙",
+    "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿"
+}
+
+# ── TRADUCCIÓN CON CACHÉ ─────────────────────────────────────────────────────
+@st.cache_data(ttl=3600)
+def traducir(texto: str) -> str:
+    if not texto:
+        return "Sin descripción disponible."
+    clean = re.sub('<[^<]+?>', '', texto).strip()[:400]
     try:
-        return GoogleTranslator(source='en', target='es').translate(clean[:400])
-    except:
+        return GoogleTranslator(source='en', target='es').translate(clean)
+    except Exception:
         return clean
 
-def fetch_intel(cat_label):
+# ── FETCH RSS CON CACHÉ Y FILTRADO ───────────────────────────────────────────
+@st.cache_data(ttl=600)
+def fetch_intel(cat_label: str) -> list:
     articles = []
     urls = FEEDS.get(cat_label, [])
-    
-    # Filtro de tiempo para CVEs (2025-2026)
-    current_year = str(datetime.now().year)
-    prev_year = str(datetime.now().year - 1)
-    allowed_years = [current_year, prev_year]
+    keywords = FILTROS.get(cat_label, [])
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+    }
 
     for url in urls:
         try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as response:
+            with urllib.request.urlopen(req, timeout=12) as response:
                 content = response.read()
-                feed = feedparser.parse(content)
-            
-            for entry in feed.entries[:12]:
-                title = entry.title
-                desc = entry.get("summary", entry.get("description", ""))
-                content_lower = (title + desc).lower()
-                
-                # Filtrado específico para CVEs
-                if cat_label == "☣ CVEs":
-                    cve_match = re.search(r'cve-\d{4}', content_lower)
-                    if cve_match and cve_match.group().split('-')[1] not in allowed_years:
-                        continue
-                    if not any(k in content_lower for k in ["vulnerability", "exploit", "cve-", "apple-sa-"]):
-                        continue
+            feed = feedparser.parse(content)
+
+            for entry in feed.entries[:15]:
+                title = entry.get("title", "")
+                desc  = entry.get("summary", entry.get("description", ""))
+                link  = entry.get("link", "#")
+                content_lower = (title + " " + desc).lower()
+
+                # Filtrar por keywords relevantes a la categoría
+                if keywords and not any(k in content_lower for k in keywords):
+                    continue
 
                 source = url.split("//")[1].split("/")[0].replace("www.", "").upper()
-                articles.append({"title": title, "description": desc, "link": entry.link, "source": source})
-        except:
+                articles.append({
+                    "title": title,
+                    "description": desc,
+                    "link": link,
+                    "source": source,
+                })
+        except Exception:
             continue
-            
-    unique = []
-    seen = set()
+
+    # Deduplicar por título
+    seen, unique = set(), []
     for a in articles:
-        if a['title'].lower() not in seen:
+        key = a["title"].lower().strip()
+        if key not in seen and key:
             unique.append(a)
-            seen.add(a['title'].lower())
+            seen.add(key)
+
     return unique[:12]
 
-# ── CABECERA BY CONDORHACKS (SINCRONIZACIÓN ALCALÁ) ──────────────────────────
+# ── CABECERA ─────────────────────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
 
-# Ajuste de zona horaria a España (Madrid/Alcalá)
 madrid_tz = pytz.timezone('Europe/Madrid')
 hora_local = datetime.now(madrid_tz).strftime('%H:%M')
 
@@ -134,31 +174,51 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 st.markdown("---")
 
-# ── SELECTOR DE SECTOR ──────────────────────────────────────────────────────
-cat_label = st.selectbox("Sector", list(FEEDS.keys()), label_visibility="collapsed")
+# ── SELECTOR + BOTÓN REFRESCO ────────────────────────────────────────────────
+col1, col2 = st.columns([4, 1])
+with col1:
+    cat_label = st.selectbox("Sector", list(FEEDS.keys()), label_visibility="collapsed")
+with col2:
+    if st.button("↻", help="Refrescar noticias"):
+        st.cache_data.clear()
+        st.rerun()
 
+# ── CARGA Y RENDERIZADO ───────────────────────────────────────────────────────
 with st.spinner("Estableciendo conexión segura con el nodo..."):
     results = fetch_intel(cat_label)
-    if results:
-        for art in results:
-            t_title = limpiar_y_traducir(art["title"])
-            t_desc = limpiar_y_traducir(art["description"])
-            st.markdown(f"""
-            <div class="news-card">
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.6rem;">
-                    <span style="font-size:0.65rem; color:#00cfff; font-weight:bold;">{CAT_ICONS.get(cat_label, "◈")} {cat_label.split()[-1]}</span>
-                    <span style="font-size:0.55rem; color:rgba(0,255,136,0.4);">{art['source']}</span>
-                </div>
-                <div style="font-size:1rem; color:#ffffff; font-weight:bold; line-height:1.3; margin-bottom:0.7rem;">{t_title}</div>
-                <div style="font-size:0.82rem; color:rgba(200,255,200,0.8); line-height:1.6; margin-bottom:1rem;">{t_desc}</div>
-                <div style="text-align:right;">
-                    <a href="{art['link']}" target="_blank" style="color:#00ff88; font-size:0.7rem; text-decoration:none; border: 1px solid rgba(0,255,136,0.4); padding: 4px 10px; border-radius: 2px;">
-                        ANALIZAR NODO ▶
-                    </a>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.error("⚠️ El sector seleccionado no responde. Intenta refrescar el nodo.")
 
-st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.1); margin-top:4rem;'>ENCRIPTACIÓN RSA-4096 ACTIVA | RSS FEED DIRECTO | NODO ALCALÁ</p>", unsafe_allow_html=True)
+if results:
+    st.markdown(
+        f"<p style='font-size:0.62rem; color:rgba(0,255,136,0.35); margin-bottom:1rem;'>"
+        f"NODOS ACTIVOS: <span style='color:#00ff88'>{len(results)}</span> &nbsp;·&nbsp; "
+        f"FUENTES: <span style='color:#00cfff'>{len(FEEDS[cat_label])}</span>"
+        f"</p>",
+        unsafe_allow_html=True,
+    )
+    for art in results:
+        t_title = traducir(art["title"])
+        t_desc  = traducir(art["description"])
+        st.markdown(f"""
+        <div class="news-card">
+            <div style="display:flex; justify-content:space-between; margin-bottom:0.6rem;">
+                <span style="font-size:0.65rem; color:#00cfff; font-weight:bold;">{CAT_ICONS.get(cat_label, "◈")} {cat_label.split()[-1]}</span>
+                <span style="font-size:0.55rem; color:rgba(0,255,136,0.4);">{art['source']}</span>
+            </div>
+            <div style="font-size:1rem; color:#ffffff; font-weight:bold; line-height:1.3; margin-bottom:0.7rem;">{t_title}</div>
+            <div style="font-size:0.82rem; color:rgba(200,255,200,0.8); line-height:1.6; margin-bottom:1rem;">{t_desc}</div>
+            <div style="text-align:right;">
+                <a href="{art['link']}" target="_blank" style="color:#00ff88; font-size:0.7rem; text-decoration:none; border: 1px solid rgba(0,255,136,0.4); padding: 4px 10px; border-radius: 2px;">
+                    ANALIZAR NODO ▶
+                </a>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+else:
+    st.error("⚠️ El sector seleccionado no responde. Pulsa ↻ para refrescar.")
+
+st.markdown(
+    "<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.1); margin-top:4rem;'>"
+    "ENCRIPTACIÓN RSA-4096 ACTIVA | RSS FEED DIRECTO | NODO ALCALÁ"
+    "</p>",
+    unsafe_allow_html=True,
+)
