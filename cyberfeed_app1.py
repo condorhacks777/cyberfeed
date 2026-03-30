@@ -45,7 +45,7 @@ p, li, span, label { color: rgba(200,255,200,0.9) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── FUENTES DE INTELIGENCIA (ORDENADAS POR RELEVANCIA) ───────────────────────
+# ── FUENTES DE INTELIGENCIA ──────────────────────────────────────────────────
 FEEDS = {
     "◈ TODAS": ["https://thehackernews.com/feeds/posts/default", "https://www.bleepingcomputer.com/feed/"],
     "⚠ BRECHAS": ["https://www.bleepingcomputer.com/feed/", "https://krebsonsecurity.com/feed/"],
@@ -53,8 +53,7 @@ FEEDS = {
     "☣ CVEs": [
         "https://seclists.org/rss/fulldisclosure.rss",
         "https://packetstormsecurity.com/feeds/advisories/",
-        "https://www.vulnerability-lab.com/rss/rss.php",
-        "https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss.xml"
+        "https://www.vulnerability-lab.com/rss/rss.php"
     ],
     "◉ GRUPOS APT": ["https://thehackernews.com/search/label/APT", "https://www.mandiant.com/resources/blog/rss.xml"],
     "₿ CRYPTO": ["https://www.rekt.news/rss"]
@@ -75,6 +74,8 @@ def limpiar_y_traducir(texto):
 def fetch_intel(cat_label):
     articles = []
     urls = FEEDS.get(cat_label, [])
+    
+    # Filtros de año solo para CVEs
     current_year = str(datetime.now().year)
     prev_year = str(datetime.now().year - 1)
     allowed_years = [current_year, prev_year]
@@ -82,21 +83,25 @@ def fetch_intel(cat_label):
     for url in urls:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:15]:
+            for entry in feed.entries[:20]:
                 title = entry.title
                 desc = entry.get("summary", entry.get("description", ""))
                 content_lower = (title + desc).lower()
                 
+                # --- LÓGICA DE FILTRADO ---
                 if cat_label == "☣ CVEs":
+                    # Filtro estricto por año solo en CVEs
                     cve_match = re.search(r'cve-\d{4}', content_lower)
                     if cve_match:
                         found_year = cve_match.group().split('-')[1]
                         if found_year not in allowed_years:
                             continue
+                    
                     tech_keywords = ["vulnerability", "exploit", "cve-", "apple-sa-", "security advisory"]
                     if not any(k in content_lower for k in tech_keywords):
                         continue
-
+                
+                # Para el resto (HERRAMIENTAS, etc.), no filtramos por año
                 source = url.split("//")[1].split("/")[0].replace("www.", "").upper()
                 articles.append({"title": title, "description": desc, "link": entry.link, "source": source})
         except: continue
@@ -109,9 +114,8 @@ def fetch_intel(cat_label):
             seen.add(a['title'].lower())
     return unique[:12]
 
-# ── CABECERA CON FIRMA BY CONDORHACKS ────────────────────────────────────────
+# ── CABECERA BY CONDORHACKS ──────────────────────────────────────────────────
 st.markdown("<h1 style='text-align:center'>◈ CYBER<span style='color:#ff2d2d'>FEED</span></h1>", unsafe_allow_html=True)
-
 st.markdown(f"""
 <div style='text-align:center; margin-top:-0.5rem; margin-bottom:1.5rem;'>
     <p style='font-size:0.65rem; color:rgba(0,255,136,0.6); letter-spacing:0.15em; margin:0;'>
@@ -122,10 +126,8 @@ st.markdown(f"""
     </p>
 </div>
 """, unsafe_allow_html=True)
-
 st.markdown("---")
 
-# ── SELECTOR Y RESULTADOS ───────────────────────────────────────────────────
 cat_label = st.selectbox("Sector", list(FEEDS.keys()), label_visibility="collapsed")
 
 with st.spinner("Sincronizando con el satélite..."):
@@ -140,12 +142,8 @@ with st.spinner("Sincronizando con el satélite..."):
                     <span style="font-size:0.65rem; color:#00cfff; font-weight:bold;">{CAT_ICONS.get(cat_label, "◈")} {cat_label.split()[-1]}</span>
                     <span style="font-size:0.55rem; color:rgba(0,255,136,0.4);">{art['source']}</span>
                 </div>
-                <div style="font-size:1rem; color:#ffffff; font-weight:bold; line-height:1.3; margin-bottom:0.7rem;">
-                    {t_title}
-                </div>
-                <div style="font-size:0.82rem; color:rgba(200,255,200,0.8); line-height:1.6; margin-bottom:1rem;">
-                    {t_desc}
-                </div>
+                <div style="font-size:1rem; color:#ffffff; font-weight:bold; line-height:1.3; margin-bottom:0.7rem;">{t_title}</div>
+                <div style="font-size:0.82rem; color:rgba(200,255,200,0.8); line-height:1.6; margin-bottom:1rem;">{t_desc}</div>
                 <div style="text-align:right;">
                     <a href="{art['link']}" target="_blank" style="color:#00ff88; font-size:0.7rem; text-decoration:none; border: 1px solid rgba(0,255,136,0.4); padding: 4px 10px; border-radius: 2px;">
                         ANALIZAR NODO ▶
@@ -154,6 +152,6 @@ with st.spinner("Sincronizando con el satélite..."):
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.error("⚠️ Filtro temporal activo: No hay amenazas críticas detectadas en las últimas 48h.")
+        st.error("⚠️ Sin señales en este sector. Intenta refrescar el nodo.")
 
 st.markdown("<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.1); margin-top:4rem;'>ENCRIPTACIÓN RSA-4096 ACTIVA | RSS FEED DIRECTO | NODO ALCALÁ</p>", unsafe_allow_html=True)
