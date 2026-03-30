@@ -9,7 +9,6 @@ NEWSAPI_KEY = "51214314c9a148fa9cf8ee9d69771431"
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
-
 html, body, [class*="stApp"] {
     background-color: #000a03 !important;
     color: #00ff88 !important;
@@ -53,38 +52,64 @@ p, li, span, label { color: rgba(200,255,200,0.85) !important; font-family: 'Sha
 </style>
 """, unsafe_allow_html=True)
 
-# ── Categorías con queries en español ─────────────────────────────────────────
-# language=es trae artículos en español directamente, sin necesidad de traducir
-CATEGORIAS = {
-    "◈ TODAS":         ("ciberseguridad OR hacking OR ransomware OR malware OR vulnerabilidad OR \"filtración de datos\"", "es"),
-    "⚠ BRECHAS":       ("\"filtración de datos\" OR \"brecha de seguridad\" OR hackeo OR ransomware", "es"),
-    "⚙ HERRAMIENTAS":  ("herramienta hacking OR ciberseguridad software OR pentest OR exploit", "es"),
-    "☣ CVEs":          ("CVE OR vulnerabilidad OR \"día cero\" OR parche de seguridad", "es"),
-    "◉ GRUPOS APT":    ("APT OR ciberespionaje OR \"ataque estatal\" OR grupo hacker", "es"),
-    "₿ CRYPTO":        ("hackeo cripto OR DeFi exploit OR \"robo criptomonedas\" OR exchange hackeado", "es"),
-}
+# ── Fuentes especializadas en ciberseguridad ──────────────────────────────────
+# Solo medios 100% de ciberseguridad/tecnología — sin medios generalistas
+CYBER_DOMAINS = (
+    "thehackernews.com,bleepingcomputer.com,krebsonsecurity.com,"
+    "threatpost.com,darkreading.com,securityweek.com,"
+    "cyberscoop.com,wired.com,arstechnica.com,techcrunch.com"
+)
 
-# Fuentes en español de ciberseguridad + medios generales en español
-FUENTES_ES = "el-mundo,el-pais,abc,la-vanguardia,20minutos"
+# ── Queries estrictamente técnicas por categoría ──────────────────────────────
+CATEGORIAS = {
+    "◈ TODAS":         "cybersecurity hacking (breach OR ransomware OR malware OR CVE OR exploit OR vulnerability)",
+    "⚠ BRECHAS":       "(\"data breach\" OR \"data leak\" OR ransomware) (company OR hospital OR government OR million records)",
+    "⚙ HERRAMIENTAS":  "(hacking tool OR pentest OR exploit OR \"red team\" OR \"offensive security\") (released OR new OR github)",
+    "☣ CVEs":          "(CVE OR vulnerability OR \"zero-day\" OR \"patch tuesday\") (critical OR high severity OR CVSS)",
+    "◉ GRUPOS APT":    "(APT OR \"nation state\" OR \"state sponsored\") (hacking OR cyberespionage OR campaign OR attack)",
+    "₿ CRYPTO":        "(crypto OR DeFi OR blockchain OR NFT OR exchange) (hack OR exploit OR stolen OR breach OR million)",
+}
 
 CAT_ICONS = {
     "◈ TODAS": "◈", "⚠ BRECHAS": "⚠", "⚙ HERRAMIENTAS": "⚙",
     "☣ CVEs": "☣", "◉ GRUPOS APT": "◉", "₿ CRYPTO": "₿",
 }
 
+# ── Traducción gratuita con MyMemory API (sin key) ───────────────────────────
+def traducir(texto: str) -> str:
+    """Traduce inglés→español usando MyMemory (gratis, sin API key, 5000 chars/día)."""
+    if not texto or len(texto) < 5:
+        return texto
+    try:
+        r = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": texto[:500], "langpair": "en|es"},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            traduccion = data.get("responseData", {}).get("translatedText", "")
+            # MyMemory devuelve el original si falla
+            if traduccion and traduccion.upper() != texto.upper():
+                return traduccion
+    except Exception:
+        pass
+    return texto
 
+
+# ── NewsAPI ───────────────────────────────────────────────────────────────────
 def fetch_news(cat_label: str, page_size: int = 10) -> list:
-    query, lang = CATEGORIAS[cat_label]
-    desde = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")  # 30 días para más resultados en español
+    query = CATEGORIAS[cat_label]
+    desde = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
-    # Primero intentar con language=es
     r = requests.get(
         "https://newsapi.org/v2/everything",
         params={
             "q": query,
+            "domains": CYBER_DOMAINS,   # Solo fuentes especializadas en cyber
             "from": desde,
             "sortBy": "publishedAt",
-            "language": lang,
+            "language": "en",
             "pageSize": page_size,
             "apiKey": NEWSAPI_KEY,
         },
@@ -95,28 +120,10 @@ def fetch_news(cat_label: str, page_size: int = 10) -> list:
     if r.status_code == 429:
         raise ValueError("Límite de llamadas alcanzado. Inténtalo más tarde.")
     r.raise_for_status()
+
     arts = r.json().get("articles", [])
 
-    # Si hay pocos resultados en español, completar con inglés
-    if len(arts) < 3:
-        query_en, _ = CATEGORIAS[cat_label]
-        query_en = query_en.replace("ciberseguridad", "cybersecurity").replace("vulnerabilidad", "vulnerability").replace("hackeo", "hack").replace("herramienta", "tool").replace("cripto", "crypto").replace("parche de seguridad", "security patch")
-        r2 = requests.get(
-            "https://newsapi.org/v2/everything",
-            params={
-                "q": "cybersecurity OR hacking OR ransomware OR CVE OR \"data breach\"",
-                "from": desde,
-                "sortBy": "publishedAt",
-                "language": "en",
-                "pageSize": page_size,
-                "apiKey": NEWSAPI_KEY,
-            },
-            timeout=10,
-        )
-        if r2.status_code == 200:
-            arts = r2.json().get("articles", [])
-
-    # Limpiar sufijo " - Fuente" del título
+    # Limpiar sufijo " - Fuente"
     for a in arts:
         if a.get("title") and " - " in a["title"]:
             a["title"] = a["title"].rsplit(" - ", 1)[0]
@@ -132,13 +139,17 @@ def format_date(iso: str) -> str:
         return iso[:10] if iso else "—"
 
 
-def render_card(article: dict, cat_label: str):
+def render_card(article: dict, cat_label: str, traducir_texto: bool):
     title  = article.get("title") or "Sin título"
     desc   = article.get("description") or "Sin descripción disponible."
     source = article.get("source", {}).get("name", "Desconocida")
     url    = article.get("url", "#")
     fecha  = format_date(article.get("publishedAt", ""))
     icon   = CAT_ICONS.get(cat_label, "◈")
+
+    if traducir_texto:
+        title = traducir(title)
+        desc  = traducir(desc)
 
     st.markdown(f"""
     <div class="news-card">
@@ -178,6 +189,7 @@ with col2:
     buscar = st.button("↻ BUSCAR")
 
 num_noticias = st.slider("Número de noticias", 5, 20, 10, 5)
+traducir_activo = st.toggle("🌐 Traducir al español", value=True)
 
 # ── Sesión ────────────────────────────────────────────────────────────────────
 for k, v in [("articles", []), ("ultima_cat", None), ("ultima_sync", None)]:
@@ -187,7 +199,7 @@ for k, v in [("articles", []), ("ultima_cat", None), ("ultima_sync", None)]:
 cargar = buscar or st.session_state.ultima_cat != cat_label
 
 if cargar:
-    with st.spinner("⚡ Buscando noticias en español..."):
+    with st.spinner("⚡ Buscando noticias de ciberseguridad..."):
         try:
             arts = fetch_news(cat_label, page_size=num_noticias)
             st.session_state.articles    = arts
@@ -211,13 +223,15 @@ if articles:
         f"</p>",
         unsafe_allow_html=True,
     )
+    if traducir_activo:
+        st.info("⏳ Traduciendo noticias al español... puede tardar unos segundos.")
+
     for art in articles:
-        render_card(art, cat_label)
+        render_card(art, cat_label, traducir_activo)
 
     st.markdown(
         "<p style='text-align:center; font-size:0.58rem; color:rgba(0,255,136,0.2); margin-top:1rem;'>"
-        "◈ CYBERFEED · NOTICIAS VÍA NEWSAPI ◈<br>"
-        "Verifica siempre la fuente original antes de compartir."
+        "◈ CYBERFEED · FUENTES: THEHACKERNEWS · BLEEPINGCOMPUTER · KREBSONSECURITY · Y MÁS ◈"
         "</p>",
         unsafe_allow_html=True,
     )
