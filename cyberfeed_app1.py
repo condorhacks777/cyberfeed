@@ -40,6 +40,14 @@ h1 { font-family: 'Orbitron', monospace !important; color: #00ff88 !important; l
     transition: all 0.3s ease;
 }
 .news-card:hover { border-color: #ffffff; background: rgba(0,40,20,0.9); transform: translateX(5px); }
+.kofi-banner {
+    display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+    border: 1px solid rgba(255,94,10,0.3);
+    background: rgba(255,94,10,0.06);
+    padding: 0.6rem 1rem;
+    margin-bottom: 1rem;
+    text-decoration: none;
+}
 hr { border-color: rgba(0,255,136,0.2) !important; }
 p, li, span, label { color: rgba(200,255,200,0.9) !important; }
 #MainMenu, footer, header { visibility: hidden; }
@@ -50,38 +58,37 @@ p, li, span, label { color: rgba(200,255,200,0.9) !important; }
 # ── FUENTES RSS POR CATEGORÍA ─────────────────────────────────────────────────
 FEEDS = {
     "◈ TODAS": [
-        "https://feeds.feedburner.com/TheHackersNews",          # The Hacker News
-        "https://www.bleepingcomputer.com/feed/",               # Bleeping Computer
+        "https://feeds.feedburner.com/TheHackersNews",
+        "https://www.bleepingcomputer.com/feed/",
     ],
     "⚠ BRECHAS": [
-        "https://www.bleepingcomputer.com/feed/",               # Bleeping Computer
-        "https://krebsonsecurity.com/feed/",                    # Krebs on Security
-        "https://hackread.com/feed/",                           # HackRead
+        "https://www.bleepingcomputer.com/feed/",
+        "https://krebsonsecurity.com/feed/",
+        "https://hackread.com/feed/",
     ],
     "⚙ HERRAMIENTAS": [
-        "https://www.kitploit.com/feeds/posts/default",         # KitPloit — herramientas hacking
-        "https://blog.rapid7.com/rss/",                        # Rapid7 — releases y tools
-        "https://www.rcesecurity.com/feed/",                   # RCE Security — exploits y tools
-        "https://feeds.feedburner.com/TheHackersNews",          # THN — sección tools
+        "https://www.kitploit.com/feeds/posts/default",
+        "https://blog.rapid7.com/rss/",
+        "https://www.rcesecurity.com/feed/",
+        "https://feeds.feedburner.com/TheHackersNews",
     ],
     "☣ CVEs": [
-        "https://www.cisa.gov/cybersecurity-advisories/all.xml",# CISA advisories oficiales
-        "https://blog.rapid7.com/rss/",                        # Rapid7 vuln research
-        "https://packetstormsecurity.com/feeds/advisories/",   # Packet Storm advisories
+        "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        "https://blog.rapid7.com/rss/",
+        "https://packetstormsecurity.com/feeds/advisories/",
     ],
     "◉ GRUPOS APT": [
         "https://feeds.feedburner.com/TheHackersNews",
-        "https://www.mandiant.com/resources/blog/rss.xml",     # Mandiant threat intel
-        "https://cyble.com/feed/",                             # Cyble threat intel
+        "https://www.mandiant.com/resources/blog/rss.xml",
+        "https://cyble.com/feed/",
     ],
     "₿ CRYPTO": [
-        "https://rekt.news/rss/feed.xml",                      # Rekt News — DeFi hacks
-        "https://protos.com/feed/",                            # Protos — crypto security
-        "https://hackread.com/feed/",                          # HackRead — crypto hacks
+        "https://rekt.news/rss/feed.xml",
+        "https://protos.com/feed/",
+        "https://hackread.com/feed/",
     ],
 }
 
-# Keywords de filtrado por categoría para evitar noticias irrelevantes
 FILTROS = {
     "◈ TODAS":        ["hack", "breach", "malware", "ransomware", "vulnerability", "exploit", "cve", "attack", "cyber"],
     "⚠ BRECHAS":      ["breach", "leak", "hack", "ransomware", "stolen", "exposed", "million records", "data"],
@@ -113,47 +120,32 @@ def fetch_intel(cat_label: str) -> list:
     articles = []
     urls = FEEDS.get(cat_label, [])
     keywords = FILTROS.get(cat_label, [])
-
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'application/rss+xml, application/xml, text/xml, */*',
     }
-
     for url in urls:
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=12) as response:
                 content = response.read()
             feed = feedparser.parse(content)
-
             for entry in feed.entries[:15]:
                 title = entry.get("title", "")
                 desc  = entry.get("summary", entry.get("description", ""))
                 link  = entry.get("link", "#")
-                content_lower = (title + " " + desc).lower()
-
-                # Filtrar por keywords relevantes a la categoría
-                if keywords and not any(k in content_lower for k in keywords):
+                if keywords and not any(k in (title + " " + desc).lower() for k in keywords):
                     continue
-
                 source = url.split("//")[1].split("/")[0].replace("www.", "").upper()
-                articles.append({
-                    "title": title,
-                    "description": desc,
-                    "link": link,
-                    "source": source,
-                })
+                articles.append({"title": title, "description": desc, "link": link, "source": source})
         except Exception:
             continue
-
-    # Deduplicar por título
     seen, unique = set(), []
     for a in articles:
         key = a["title"].lower().strip()
         if key not in seen and key:
             unique.append(a)
             seen.add(key)
-
     return unique[:12]
 
 # ── CABECERA ─────────────────────────────────────────────────────────────────
@@ -163,7 +155,7 @@ madrid_tz = pytz.timezone('Europe/Madrid')
 hora_local = datetime.now(madrid_tz).strftime('%H:%M')
 
 st.markdown(f"""
-<div style='text-align:center; margin-top:-0.5rem; margin-bottom:1.5rem;'>
+<div style='text-align:center; margin-top:-0.5rem; margin-bottom:1rem;'>
     <p style='font-size:0.65rem; color:rgba(0,255,136,0.6); letter-spacing:0.15em; margin:0;'>
         INTEL ACTUALIZADA · {hora_local}
     </p>
@@ -172,6 +164,18 @@ st.markdown(f"""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
+# ── KO-FI BANNER ─────────────────────────────────────────────────────────────
+st.markdown("""
+<a href="https://ko-fi.com/condorhacks" target="_blank" class="kofi-banner">
+    <span style="font-size:1.1rem;">☕</span>
+    <span style="font-size:0.68rem; color:rgba(255,140,60,0.9); letter-spacing:0.1em;">
+        ¿TE RESULTA ÚTIL? APOYA CYBERFEED EN KO-FI
+    </span>
+    <span style="font-size:0.6rem; color:rgba(255,94,10,0.5); letter-spacing:0.08em;">→ ko-fi.com/condorhacks</span>
+</a>
+""", unsafe_allow_html=True)
+
 st.markdown("---")
 
 # ── SELECTOR + BOTÓN REFRESCO ────────────────────────────────────────────────
@@ -216,9 +220,15 @@ if results:
 else:
     st.error("⚠️ El sector seleccionado no responde. Pulsa ↻ para refrescar.")
 
-st.markdown(
-    "<p style='text-align:center; font-size:0.55rem; color:rgba(0,255,136,0.1); margin-top:4rem;'>"
-    "ENCRIPTACIÓN RSA-4096 ACTIVA | RSS FEED DIRECTO | NODO ALCALÁ"
-    "</p>",
-    unsafe_allow_html=True,
-)
+# ── FOOTER ───────────────────────────────────────────────────────────────────
+st.markdown("""
+<div style='text-align:center; margin-top:3rem;'>
+    <a href="https://ko-fi.com/condorhacks" target="_blank"
+       style="color:rgba(255,94,10,0.45); font-size:0.55rem; text-decoration:none; letter-spacing:0.2em;">
+        ☕ APOYA EL PROYECTO · KO-FI.COM/CONDORHACKS
+    </a>
+    <p style='font-size:0.5rem; color:rgba(0,255,136,0.1); margin-top:0.5rem; letter-spacing:0.15em;'>
+        ENCRIPTACIÓN RSA-4096 ACTIVA | RSS FEED DIRECTO | NODO ALCALÁ
+    </p>
+</div>
+""", unsafe_allow_html=True)
