@@ -168,8 +168,11 @@ st.markdown(f"""
 # ── KO-FI BOTÓN OFICIAL ──────────────────────────────────────────────────────
 st.markdown("""
 <div style="display:flex; justify-content:center; margin-bottom:0.5rem;">
-    <script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script>
-    <script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#72a4f2', 'X8X11XBB0Z');kofiwidget2.draw();</script>
+    <a href='https://ko-fi.com/X8X11XBB0Z' target='_blank'>
+        <img height='36' style='border:0px;height:36px;'
+             src='https://storage.ko-fi.com/cdn/kofi2.png?v=3'
+             alt='Buy Me a Coffee at ko-fi.com' />
+    </a>
 </div>
 """, unsafe_allow_html=True)
 
