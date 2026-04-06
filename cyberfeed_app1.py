@@ -165,15 +165,12 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── KO-FI BANNER ─────────────────────────────────────────────────────────────
+# ── KO-FI BOTÓN OFICIAL ──────────────────────────────────────────────────────
 st.markdown("""
-<a href="https://ko-fi.com/condorhacks" target="_blank" class="kofi-banner">
-    <span style="font-size:1.1rem;">☕</span>
-    <span style="font-size:0.68rem; color:rgba(255,140,60,0.9); letter-spacing:0.1em;">
-        ¿TE RESULTA ÚTIL? APOYA CYBERFEED EN KO-FI
-    </span>
-    <span style="font-size:0.6rem; color:rgba(255,94,10,0.5); letter-spacing:0.08em;">→ ko-fi.com/condorhacks</span>
-</a>
+<div style="display:flex; justify-content:center; margin-bottom:0.5rem;">
+    <script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script>
+    <script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#72a4f2', 'X8X11XBB0Z');kofiwidget2.draw();</script>
+</div>
 """, unsafe_allow_html=True)
 
 st.markdown("---")
