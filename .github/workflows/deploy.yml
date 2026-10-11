@@ -1,31 +1,10 @@
-name: Build and deploy CyberFeed
-
+name: Refrescar CyberFeed
 on:
   schedule:
-    - cron: "0 * * * *"   # cada hora
-  workflow_dispatch:       # botón manual
-  push:
-    branches: [main]
-
+    - cron: "0 * * * *"
+  workflow_dispatch:
 jobs:
-  deploy:
+  refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Instalar dependencias
-        run: pip install feedparser deep-translator
-
-      - name: Generar sitio
-        run: python build.py
-
-      - name: Desplegar en Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=cyberfeed
+      - run: curl -X POST "${{ secrets.CF_DEPLOY_HOOK }}"
