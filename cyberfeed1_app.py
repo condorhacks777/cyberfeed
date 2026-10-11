@@ -1,8 +1,9 @@
 
 import re
 import html
-from email.utils import parsedate_to_datetime
+import time
 from datetime import timezone
+from email.utils import parsedate_to_datetime
 
 import feedparser
 import requests
@@ -38,7 +39,7 @@ CATEGORIAS = [
 
 
 # ==================================================
-# ESTILOS
+# DISEÑO
 # ==================================================
 
 st.markdown(
@@ -50,7 +51,7 @@ st.markdown(
     }
 
     [data-testid="stHeader"] {
-        background: rgba(7, 17, 31, 0.95);
+        background: rgba(7,17,31,.95);
     }
 
     [data-testid="stSidebar"] {
@@ -65,7 +66,7 @@ st.markdown(
         color: #93a9c4;
         font-size: 1rem;
         margin-top: -10px;
-        margin-bottom: 25px;
+        margin-bottom: 24px;
     }
 
     .cf-tag {
@@ -75,13 +76,13 @@ st.markdown(
         margin-bottom: 8px;
         color: #62e6ce;
         background: #10312f;
-        font-size: 0.78rem;
+        font-size: .78rem;
         font-weight: 600;
     }
 
     .cf-source {
         color: #91a6bf;
-        font-size: 0.82rem;
+        font-size: .82rem;
         margin-bottom: 8px;
     }
 
@@ -95,13 +96,13 @@ st.markdown(
 
     .cf-summary {
         color: #c1cde0;
-        font-size: 0.96rem;
+        font-size: .96rem;
         line-height: 1.65;
     }
 
     .cf-date {
         color: #7f96b2;
-        font-size: 0.8rem;
+        font-size: .8rem;
         margin-top: 10px;
     }
 
@@ -111,7 +112,7 @@ st.markdown(
 
     div[data-testid="stMetric"] {
         background: #0d1b2d;
-        padding: 15px;
+        padding: 14px;
         border: 1px solid #1b3047;
         border-radius: 12px;
     }
@@ -130,7 +131,7 @@ st.markdown(
 
 
 # ==================================================
-# LIMPIAR TEXTO RSS
+# LIMPIEZA DE TEXTO
 # ==================================================
 
 def limpiar_html(texto):
@@ -177,82 +178,51 @@ def obtener_fecha(entry):
 
 
 # ==================================================
-# CLASIFICAR NOTICIAS
+# CLASIFICACIÓN
 # ==================================================
 
 def categorizar(texto):
     texto = f" {texto.lower()} "
 
-    vulnerabilidades = [
-        "vulnerability",
-        "vulnerabilities",
-        "vulnerabilidad",
-        "cve-",
-        "zero-day",
-        "zero day",
-        "security flaw",
-        "security patch",
-        "exploit",
-    ]
+    grupos = {
+        "Vulnerabilidades": [
+            "vulnerability", "vulnerabilities",
+            "vulnerabilidad", "cve-", "zero-day",
+            "zero day", "security flaw", "exploit",
+            "security patch",
+        ],
+        "Malware": [
+            "malware", "ransomware", "trojan",
+            "stealer", "botnet", "spyware",
+            "infostealer", "backdoor", "phishing",
+        ],
+        "Inteligencia artificial": [
+            "artificial intelligence", "machine learning",
+            "generative ai", "chatgpt", "openai",
+            "large language model", "llm",
+        ],
+        "Hacking": [
+            "hacker", "hacking", "cyberattack",
+            "cyber attack", "data breach", "data leak",
+            "hacked", "attackers",
+        ],
+    }
 
-    malware = [
-        "malware",
-        "ransomware",
-        "trojan",
-        "stealer",
-        "botnet",
-        "spyware",
-        "infostealer",
-        "backdoor",
-        "phishing",
-    ]
-
-    inteligencia_artificial = [
-        "artificial intelligence",
-        "machine learning",
-        "generative ai",
-        "chatgpt",
-        "openai",
-        "large language model",
-        "llm",
-    ]
-
-    hacking = [
-        "hacker",
-        "hacking",
-        "cyberattack",
-        "cyber attack",
-        "data breach",
-        "data leak",
-        "hacked",
-        "attackers",
-    ]
-
-    if any(p in texto for p in vulnerabilidades):
-        return "Vulnerabilidades"
-
-    if any(p in texto for p in malware):
-        return "Malware"
-
-    if any(p in texto for p in inteligencia_artificial):
-        return "Inteligencia artificial"
-
-    if any(p in texto for p in hacking):
-        return "Hacking"
+    for categoria, palabras in grupos.items():
+        if any(p in texto for p in palabras):
+            return categoria
 
     return "General"
 
 
 # ==================================================
-# GOOGLE TRANSLATOR
+# TRADUCCIÓN GOOGLE
 # ==================================================
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def traducir_espanol(texto):
     if not texto or not texto.strip():
         return texto
-
-    texto = texto.strip()
 
     try:
         traductor = GoogleTranslator(
@@ -265,14 +235,43 @@ def traducir_espanol(texto):
         if resultado and resultado.strip():
             return resultado.strip()
 
-        return texto
-
     except Exception:
-        return texto
+        pass
+
+    return texto
+
+
+def traducir_noticia(titulo, resumen):
+    """
+    Combina título y resumen para reducir las solicitudes.
+    Devuelve título traducido, resumen traducido y estado.
+    """
+    separador = "\n\n"
+
+    if resumen:
+        texto_combinado = titulo + separador + resumen[:800]
+    else:
+        texto_combinado = titulo
+
+    resultado = traducir_espanol(texto_combinado)
+
+    if resultado == texto_combinado:
+        return titulo, resumen, False
+
+    partes = resultado.split(separador, 1)
+
+    titulo_es = partes[0].strip()
+
+    if len(partes) > 1:
+        resumen_es = partes[1].strip()
+    else:
+        resumen_es = resumen
+
+    return titulo_es or titulo, resumen_es or resumen, True
 
 
 # ==================================================
-# CARGAR RSS
+# CARGAR FUENTES RSS
 # ==================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -290,15 +289,12 @@ def cargar_noticias(fuentes_seleccionadas):
             respuesta = requests.get(
                 url,
                 headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (compatible; CyberFeed/1.0)"
-                    )
+                    "User-Agent": "Mozilla/5.0 (compatible; CyberFeed/1.0)"
                 },
                 timeout=12,
             )
 
             respuesta.raise_for_status()
-
             feed = feedparser.parse(respuesta.content)
 
             if not feed.entries:
@@ -321,31 +317,24 @@ def cargar_noticias(fuentes_seleccionadas):
                 if not titulo or not enlace:
                     continue
 
-                noticias.append(
-                    {
-                        "fuente": fuente,
-                        "titulo_original": titulo,
-                        "resumen_original": resumen,
-                        "enlace": enlace,
-                        "categoria": categorizar(
-                            titulo + " " + resumen
-                        ),
-                        "fecha": obtener_fecha(entry),
-                    }
-                )
+                noticias.append({
+                    "fuente": fuente,
+                    "titulo_original": titulo,
+                    "resumen_original": resumen,
+                    "enlace": enlace,
+                    "categoria": categorizar(titulo + " " + resumen),
+                    "fecha": obtener_fecha(entry),
+                })
 
         except (requests.RequestException, ValueError):
             errores.append(fuente)
 
-    # Eliminar noticias duplicadas.
     unicas = []
     enlaces_vistos = set()
 
     for noticia in noticias:
-        enlace = noticia["enlace"]
-
-        if enlace not in enlaces_vistos:
-            enlaces_vistos.add(enlace)
+        if noticia["enlace"] not in enlaces_vistos:
+            enlaces_vistos.add(noticia["enlace"])
             unicas.append(noticia)
 
     return unicas, errores
@@ -359,31 +348,26 @@ st.title("🛡️ CyberFeed")
 
 st.markdown(
     '<div class="cf-subtitle">'
-    "Tu panel de noticias de ciberseguridad, "
-    "vulnerabilidades y amenazas."
+    "Tu panel de noticias de ciberseguridad, vulnerabilidades y amenazas."
     "</div>",
     unsafe_allow_html=True,
 )
 
-col_cabecera, col_actualizar = st.columns([3, 1])
+col_titulo, col_actualizar = st.columns([3, 1])
 
-with col_cabecera:
+with col_titulo:
     st.caption(
-        "Fuentes RSS especializadas · Traducción al español con Google Translate"
+        "Noticias RSS · Traducción al español mediante Google Translate"
     )
 
 with col_actualizar:
-    if st.button(
-        "🔄 Actualizar noticias",
-        use_container_width=True,
-    ):
+    if st.button("🔄 Actualizar noticias", use_container_width=True):
         cargar_noticias.clear()
-        traducir_espanol.clear()
         st.rerun()
 
 
 # ==================================================
-# BARRA LATERAL
+# FILTROS
 # ==================================================
 
 st.sidebar.title("⚙️ Configuración")
@@ -396,7 +380,7 @@ fuentes_seleccionadas = st.sidebar.multiselect(
 
 categoria_seleccionada = st.sidebar.selectbox(
     "Categoría",
-    options=CATEGORIAS,
+    CATEGORIAS,
 )
 
 buscar = st.sidebar.text_input(
@@ -407,31 +391,27 @@ buscar = st.sidebar.text_input(
 max_noticias = st.sidebar.slider(
     "Noticias por página",
     min_value=5,
-    max_value=30,
+    max_value=20,
     value=5,
     step=5,
 )
 
-st.sidebar.divider()
-
 st.sidebar.caption(
-    "La traducción depende de la disponibilidad del servicio web "
-    "de Google Translate. Si falla, se mostrará el texto original."
+    "Las traducciones se guardan en caché para reducir solicitudes. "
+    "Google puede limitar el acceso automatizado."
 )
 
 
 # ==================================================
-# CARGAR NOTICIAS
+# OBTENER NOTICIAS
 # ==================================================
 
 if not fuentes_seleccionadas:
-    st.info("Selecciona al menos una fuente en el menú lateral.")
+    st.info("Selecciona al menos una fuente.")
     st.stop()
 
 with st.spinner("Consultando fuentes RSS..."):
-    noticias, errores = cargar_noticias(
-        tuple(fuentes_seleccionadas)
-    )
+    noticias, errores = cargar_noticias(tuple(fuentes_seleccionadas))
 
 if errores:
     st.warning(
@@ -440,15 +420,12 @@ if errores:
     )
 
 if not noticias:
-    st.error(
-        "No se han podido cargar noticias. "
-        "Inténtalo de nuevo más tarde."
-    )
+    st.error("No se han podido cargar noticias. Inténtalo más tarde.")
     st.stop()
 
 
 # ==================================================
-# FILTRAR NOTICIAS
+# FILTRAR
 # ==================================================
 
 noticias_filtradas = []
@@ -460,13 +437,13 @@ for noticia in noticias:
     ):
         continue
 
-    texto_busqueda = (
+    texto = (
         noticia["titulo_original"]
         + " "
         + noticia["resumen_original"]
     ).lower()
 
-    if buscar and buscar.strip().lower() not in texto_busqueda:
+    if buscar and buscar.strip().lower() not in texto:
         continue
 
     noticias_filtradas.append(noticia)
@@ -476,15 +453,14 @@ for noticia in noticias:
 # MÉTRICAS
 # ==================================================
 
-total = len(noticias)
-total_filtrado = len(noticias_filtradas)
-total_fuentes = len(set(n["fuente"] for n in noticias))
-
 m1, m2, m3 = st.columns(3)
 
-m1.metric("Noticias recopiladas", total)
-m2.metric("Resultados filtrados", total_filtrado)
-m3.metric("Fuentes consultadas", total_fuentes)
+m1.metric("Noticias recopiladas", len(noticias))
+m2.metric("Resultados filtrados", len(noticias_filtradas))
+m3.metric(
+    "Fuentes seleccionadas",
+    len(fuentes_seleccionadas),
+)
 
 st.divider()
 
@@ -503,12 +479,12 @@ st.subheader("📰 Últimas noticias")
 
 st.caption(
     f"Mostrando {len(noticias_a_mostrar)} de "
-    f"{total_filtrado} resultados."
+    f"{len(noticias_filtradas)} resultados."
 )
 
-fallos_traduccion = 0
+fallos = 0
 
-for noticia in noticias_a_mostrar:
+for indice, noticia in enumerate(noticias_a_mostrar):
     st.markdown(
         f'<span class="cf-tag">'
         f'{html.escape(noticia["categoria"])}</span>',
@@ -521,18 +497,14 @@ for noticia in noticias_a_mostrar:
         unsafe_allow_html=True,
     )
 
-    # Traducir titular y resumen con Google Translator.
-    # Se limita el resumen para reducir el número de caracteres.
-    titulo_es = traducir_espanol(
-        noticia["titulo_original"]
+    # Una sola llamada por noticia, en lugar de dos.
+    titulo_es, resumen_es, traduccion_ok = traducir_noticia(
+        noticia["titulo_original"],
+        noticia["resumen_original"],
     )
 
-    resumen_original = noticia["resumen_original"][:1200]
-
-    resumen_es = traducir_espanol(resumen_original)
-
-    if titulo_es == noticia["titulo_original"]:
-        fallos_traduccion += 1
+    if not traduccion_ok:
+        fallos += 1
 
     st.markdown(
         f'<div class="cf-title">'
@@ -562,61 +534,56 @@ for noticia in noticias_a_mostrar:
 
     st.divider()
 
+    # Pausa breve entre noticias para reducir ráfagas.
+    if indice < len(noticias_a_mostrar) - 1:
+        time.sleep(0.4)
+
 
 # ==================================================
 # ESTADO DE TRADUCCIÓN
 # ==================================================
 
-if fallos_traduccion:
+if fallos:
     st.warning(
-        f"No se pudieron traducir {fallos_traduccion} titulares. "
-        "Se ha mostrado el texto original. Prueba a actualizar "
-        "más tarde si Google Translate no responde."
+        f"{fallos} noticias no se pudieron traducir. "
+        "Se ha mostrado el contenido original. Si Google ha limitado "
+        "las solicitudes, espera antes de volver a intentarlo."
     )
 else:
-    st.success("Los titulares se han procesado correctamente.")
+    st.success("Las noticias se han procesado correctamente.")
 
 
 # ==================================================
-# PRUEBA MANUAL DEL TRADUCTOR
+# PRUEBA MANUAL
 # ==================================================
 
 with st.expander("🧪 Probar Google Translator"):
     texto_prueba = st.text_input(
-        "Escribe una frase en inglés",
+        "Texto en inglés",
         value="Hackers discovered a new security vulnerability.",
-        key="texto_prueba_google",
+        key="prueba_google",
     )
 
-    if st.button("Traducir frase de prueba"):
-        if not texto_prueba.strip():
-            st.warning("Escribe una frase para traducir.")
-        else:
-            try:
-                resultado_prueba = GoogleTranslator(
-                    source="auto",
-                    target="es",
-                ).translate(texto_prueba.strip()[:4500])
+    if st.button("Probar traducción"):
+        try:
+            resultado = GoogleTranslator(
+                source="auto",
+                target="es",
+            ).translate(texto_prueba.strip()[:1000])
 
-                if resultado_prueba:
-                    st.write("**Traducción:**")
-                    st.write(resultado_prueba)
-                else:
-                    st.error("Google Translate no devolvió una traducción.")
+            st.write("**Resultado:**")
+            st.write(resultado)
 
-            except Exception as error:
-                st.error(
-                    "Google Translate no está respondiendo desde "
-                    "la aplicación."
-                )
-                st.code(str(error)[:1000])
+        except Exception as error:
+            st.error("Google Translate no ha aceptado la solicitud.")
+            st.code(str(error)[:1000])
 
 
 # ==================================================
-# PIE DE PÁGINA
+# PIE
 # ==================================================
 
 st.caption(
-    "CyberFeed · Noticias de sus respectivas fuentes. "
-    "Las traducciones automáticas pueden contener errores."
+    "CyberFeed · Las noticias pertenecen a sus fuentes originales. "
+    "La traducción automática puede contener errores."
 )
