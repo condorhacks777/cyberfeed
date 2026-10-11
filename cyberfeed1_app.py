@@ -1,14 +1,16 @@
 
 import re
 import html
-import time
+import threading
 from datetime import timezone
 from email.utils import parsedate_to_datetime
 
 import feedparser
 import requests
 import streamlit as st
-from deep_translator import GoogleTranslator
+
+import argostranslate.package
+import argostranslate.translate
 
 
 # ==================================================
@@ -37,9 +39,12 @@ CATEGORIAS = [
     "General",
 ]
 
+# Evita intentar instalar el modelo varias veces simultáneamente.
+argos_lock = threading.Lock()
+
 
 # ==================================================
-# DISEÑO
+# ESTILOS
 # ==================================================
 
 st.markdown(
@@ -117,10 +122,6 @@ st.markdown(
         border-radius: 12px;
     }
 
-    div.stButton > button {
-        border-radius: 9px;
-    }
-
     hr {
         border-color: #1b3047;
     }
@@ -131,7 +132,121 @@ st.markdown(
 
 
 # ==================================================
-# LIMPIEZA DE TEXTO
+# INSTALAR Y PREPARAR ARGOS
+# ==================================================
+
+@st.cache_resource(show_spinner=False)
+def preparar_traductor():
+    with argos_lock:
+        # Comprobar si el modelo inglés-español ya está instalado.
+        idiomas = argostranslate.translate.get_installed_languages()
+
+        ingles = next(
+            (idioma for idioma in idiomas if idioma.code == "en"),
+            None,
+        )
+
+        espanol = next(
+            (idioma for idioma in idiomas if idioma.code == "es"),
+            None,
+        )
+
+        if ingles and espanol:
+            traduccion = ingles.get_translation(espanol)
+            if traduccion:
+                return traduccion
+
+        # Descargar el índice oficial de modelos.
+        argostranslate.package.update_package_index()
+
+        paquetes = argostranslate.package.get_available_packages()
+
+        paquete = next(
+            (
+                p for p in paquetes
+                if p.from_code == "en" and p.to_code == "es"
+            ),
+            None,
+        )
+
+        if paquete is None:
+            raise RuntimeError(
+                "No se encontró el modelo de traducción inglés-español."
+            )
+
+        archivo_modelo = paquete.download()
+        argostranslate.package.install_from_path(archivo_modelo)
+
+        idiomas = argostranslate.translate.get_installed_languages()
+
+        ingles = next(
+            (idioma for idioma in idiomas if idioma.code == "en"),
+            None,
+        )
+
+        espanol = next(
+            (idioma for idioma in idiomas if idioma.code == "es"),
+            None,
+        )
+
+        if not ingles or not espanol:
+            raise RuntimeError(
+                "El modelo se descargó, pero no se pudo cargar."
+            )
+
+        traduccion = ingles.get_translation(espanol)
+
+        if traduccion is None:
+            raise RuntimeError(
+                "No se pudo preparar la traducción inglés-español."
+            )
+
+        return traduccion
+
+
+# ==================================================
+# TRADUCCIÓN LOCAL
+# ==================================================
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def traducir_espanol(texto):
+    if not texto or not texto.strip():
+        return texto
+
+    try:
+        traductor = preparar_traductor()
+        return traductor.translate(texto[:3000])
+    except Exception:
+        return texto
+
+
+def traducir_noticia(titulo, resumen):
+    separador = "\n\n"
+
+    if resumen:
+        combinado = titulo + separador + resumen[:800]
+    else:
+        combinado = titulo
+
+    resultado = traducir_espanol(combinado)
+
+    if resultado == combinado:
+        return titulo, resumen, False
+
+    partes = resultado.split(separador, 1)
+    titulo_es = partes[0].strip()
+
+    resumen_es = (
+        partes[1].strip()
+        if len(partes) > 1
+        else resumen
+    )
+
+    return titulo_es or titulo, resumen_es or resumen, True
+
+
+# ==================================================
+# LIMPIEZA RSS
 # ==================================================
 
 def limpiar_html(texto):
@@ -178,7 +293,7 @@ def obtener_fecha(entry):
 
 
 # ==================================================
-# CLASIFICACIÓN
+# CATEGORÍAS
 # ==================================================
 
 def categorizar(texto):
@@ -216,62 +331,7 @@ def categorizar(texto):
 
 
 # ==================================================
-# TRADUCCIÓN GOOGLE
-# ==================================================
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def traducir_espanol(texto):
-    if not texto or not texto.strip():
-        return texto
-
-    try:
-        traductor = GoogleTranslator(
-            source="auto",
-            target="es",
-        )
-
-        resultado = traductor.translate(texto[:4500])
-
-        if resultado and resultado.strip():
-            return resultado.strip()
-
-    except Exception:
-        pass
-
-    return texto
-
-
-def traducir_noticia(titulo, resumen):
-    """
-    Combina título y resumen para reducir las solicitudes.
-    Devuelve título traducido, resumen traducido y estado.
-    """
-    separador = "\n\n"
-
-    if resumen:
-        texto_combinado = titulo + separador + resumen[:800]
-    else:
-        texto_combinado = titulo
-
-    resultado = traducir_espanol(texto_combinado)
-
-    if resultado == texto_combinado:
-        return titulo, resumen, False
-
-    partes = resultado.split(separador, 1)
-
-    titulo_es = partes[0].strip()
-
-    if len(partes) > 1:
-        resumen_es = partes[1].strip()
-    else:
-        resumen_es = resumen
-
-    return titulo_es or titulo, resumen_es or resumen, True
-
-
-# ==================================================
-# CARGAR FUENTES RSS
+# CARGAR NOTICIAS
 # ==================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -330,11 +390,11 @@ def cargar_noticias(fuentes_seleccionadas):
             errores.append(fuente)
 
     unicas = []
-    enlaces_vistos = set()
+    vistos = set()
 
     for noticia in noticias:
-        if noticia["enlace"] not in enlaces_vistos:
-            enlaces_vistos.add(noticia["enlace"])
+        if noticia["enlace"] not in vistos:
+            vistos.add(noticia["enlace"])
             unicas.append(noticia)
 
     return unicas, errores
@@ -353,21 +413,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-col_titulo, col_actualizar = st.columns([3, 1])
+col_info, col_refresh = st.columns([3, 1])
 
-with col_titulo:
+with col_info:
     st.caption(
-        "Noticias RSS · Traducción al español mediante Google Translate"
+        "Fuentes RSS · Traducción local inglés-español con Argos Translate"
     )
 
-with col_actualizar:
+with col_refresh:
     if st.button("🔄 Actualizar noticias", use_container_width=True):
         cargar_noticias.clear()
         st.rerun()
 
 
 # ==================================================
-# FILTROS
+# BARRA LATERAL
 # ==================================================
 
 st.sidebar.title("⚙️ Configuración")
@@ -397,13 +457,36 @@ max_noticias = st.sidebar.slider(
 )
 
 st.sidebar.caption(
-    "Las traducciones se guardan en caché para reducir solicitudes. "
-    "Google puede limitar el acceso automatizado."
+    "Argos Translate funciona localmente después de instalar su modelo."
 )
 
 
 # ==================================================
-# OBTENER NOTICIAS
+# PREPARAR TRADUCTOR
+# ==================================================
+
+try:
+    with st.spinner(
+        "Preparando el traductor local. La primera carga puede tardar..."
+    ):
+        preparar_traductor()
+
+    traductor_disponible = True
+
+except Exception as error:
+    traductor_disponible = False
+
+    st.error(
+        "No se pudo instalar o iniciar el traductor local. "
+        "Comprueba los registros de Streamlit Cloud."
+    )
+
+    with st.expander("Detalles del error"):
+        st.code(str(error)[:2000])
+
+
+# ==================================================
+# CONSULTAR FUENTES
 # ==================================================
 
 if not fuentes_seleccionadas:
@@ -425,7 +508,7 @@ if not noticias:
 
 
 # ==================================================
-# FILTRAR
+# FILTROS
 # ==================================================
 
 noticias_filtradas = []
@@ -457,10 +540,7 @@ m1, m2, m3 = st.columns(3)
 
 m1.metric("Noticias recopiladas", len(noticias))
 m2.metric("Resultados filtrados", len(noticias_filtradas))
-m3.metric(
-    "Fuentes seleccionadas",
-    len(fuentes_seleccionadas),
-)
+m3.metric("Fuentes seleccionadas", len(fuentes_seleccionadas))
 
 st.divider()
 
@@ -484,7 +564,7 @@ st.caption(
 
 fallos = 0
 
-for indice, noticia in enumerate(noticias_a_mostrar):
+for noticia in noticias_a_mostrar:
     st.markdown(
         f'<span class="cf-tag">'
         f'{html.escape(noticia["categoria"])}</span>',
@@ -497,13 +577,17 @@ for indice, noticia in enumerate(noticias_a_mostrar):
         unsafe_allow_html=True,
     )
 
-    # Una sola llamada por noticia, en lugar de dos.
-    titulo_es, resumen_es, traduccion_ok = traducir_noticia(
-        noticia["titulo_original"],
-        noticia["resumen_original"],
-    )
+    if traductor_disponible:
+        titulo_es, resumen_es, traduccion_ok = traducir_noticia(
+            noticia["titulo_original"],
+            noticia["resumen_original"],
+        )
 
-    if not traduccion_ok:
+        if not traduccion_ok:
+            fallos += 1
+    else:
+        titulo_es = noticia["titulo_original"]
+        resumen_es = noticia["resumen_original"]
         fallos += 1
 
     st.markdown(
@@ -534,49 +618,44 @@ for indice, noticia in enumerate(noticias_a_mostrar):
 
     st.divider()
 
-    # Pausa breve entre noticias para reducir ráfagas.
-    if indice < len(noticias_a_mostrar) - 1:
-        time.sleep(0.4)
-
 
 # ==================================================
-# ESTADO DE TRADUCCIÓN
+# ESTADO
 # ==================================================
 
-if fallos:
+if not traductor_disponible:
     st.warning(
-        f"{fallos} noticias no se pudieron traducir. "
-        "Se ha mostrado el contenido original. Si Google ha limitado "
-        "las solicitudes, espera antes de volver a intentarlo."
+        "Se muestran los textos originales porque el traductor "
+        "no está disponible."
+    )
+elif fallos:
+    st.warning(
+        f"{fallos} noticias no pudieron traducirse correctamente."
     )
 else:
-    st.success("Las noticias se han procesado correctamente.")
-
+    st.success("Traducción local disponible.")
+    
 
 # ==================================================
-# PRUEBA MANUAL
+# PRUEBA DEL TRADUCTOR
 # ==================================================
 
-with st.expander("🧪 Probar Google Translator"):
-    texto_prueba = st.text_input(
-        "Texto en inglés",
+with st.expander("🧪 Probar traducción local"):
+    frase = st.text_input(
+        "Frase de prueba en inglés",
         value="Hackers discovered a new security vulnerability.",
-        key="prueba_google",
+        key="argos_test",
     )
 
-    if st.button("Probar traducción"):
-        try:
-            resultado = GoogleTranslator(
-                source="auto",
-                target="es",
-            ).translate(texto_prueba.strip()[:1000])
-
+    if st.button("Traducir frase"):
+        if not traductor_disponible:
+            st.error("El traductor local no está disponible.")
+        elif not frase.strip():
+            st.warning("Escribe una frase.")
+        else:
+            resultado = traducir_espanol(frase)
             st.write("**Resultado:**")
             st.write(resultado)
-
-        except Exception as error:
-            st.error("Google Translate no ha aceptado la solicitud.")
-            st.code(str(error)[:1000])
 
 
 # ==================================================
