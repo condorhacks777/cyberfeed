@@ -1,5 +1,5 @@
 streamlit
 feedparser
 requests
-deep-translator
+argotranslate
 
