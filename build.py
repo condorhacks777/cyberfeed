@@ -87,26 +87,29 @@ def translate(items):
         ("mymemory", MyMemoryTranslator(source="en-US", target="es-ES")),
     )
     ok = fail = errors = 0
+    streak = {name: 0 for name, _ in engines}  # fallos seguidos por traductor
     for a in items:
         for k in ("title", "desc"):
             if not a[k]:
                 continue
             done = False
             for name, engine in engines:
-                for _ in range(2):
-                    try:
-                        out = engine.translate(a[k])
-                        if out and out.strip():
-                            a[k] = out
-                            done = True
-                            break
-                    except Exception as e:
-                        errors += 1
-                        if errors <= 5:  # no llenar el registro
-                            print(f"[!] {name} falló: {type(e).__name__}: {str(e)[:120]}")
-                        time.sleep(1)
-                if done:
-                    break
+                if streak[name] >= 3:  # traductor caído: no insistir
+                    continue
+                try:
+                    out = engine.translate(a[k])
+                    if out and out.strip():
+                        a[k] = out
+                        streak[name] = 0
+                        done = True
+                        break
+                except Exception as e:
+                    streak[name] += 1
+                    errors += 1
+                    if errors <= 5:  # no llenar el registro
+                        print(f"[!] {name} falló: {type(e).__name__}: {str(e)[:120]}")
+                    if streak[name] >= 3:
+                        print(f"[!] {name} desactivado tras 3 fallos seguidos")
             if done:
                 ok += 1
             else:
