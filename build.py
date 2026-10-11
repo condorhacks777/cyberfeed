@@ -6,11 +6,12 @@ import calendar
 import html
 import json
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import feedparser
-from deep_translator import GoogleTranslator
+from deep_translator import GoogleTranslator, MyMemoryTranslator
 
 FEEDS = {
     "The Hacker News": "https://feeds.feedburner.com/TheHackersNews",
@@ -37,6 +38,8 @@ TOTAL = 80      # artículos totales en la página
 def clean(text, limit=300):
     text = re.sub(r"<[^>]+>", " ", text or "")
     text = html.unescape(re.sub(r"\s+", " ", text)).strip()
+    text = re.sub(r"\[\s*(\.\.\.|…)\s*\]", "", text)
+    text = re.sub(r"The post .{0,200}? appeared first on .*$", "", text).strip()
     return text[:limit]
 
 
@@ -79,14 +82,36 @@ def categorize(a):
 
 
 def translate(items):
-    tr = GoogleTranslator(source="en", target="es")
+    engines = (
+        ("google", GoogleTranslator(source="en", target="es")),
+        ("mymemory", MyMemoryTranslator(source="en-US", target="es-ES")),
+    )
+    ok = fail = errors = 0
     for a in items:
         for k in ("title", "desc"):
-            if a[k]:
-                try:
-                    a[k] = tr.translate(a[k])
-                except Exception:
-                    pass  # si falla, se queda en inglés
+            if not a[k]:
+                continue
+            done = False
+            for name, engine in engines:
+                for _ in range(2):
+                    try:
+                        out = engine.translate(a[k])
+                        if out and out.strip():
+                            a[k] = out
+                            done = True
+                            break
+                    except Exception as e:
+                        errors += 1
+                        if errors <= 5:  # no llenar el registro
+                            print(f"[!] {name} falló: {type(e).__name__}: {str(e)[:120]}")
+                        time.sleep(1)
+                if done:
+                    break
+            if done:
+                ok += 1
+            else:
+                fail += 1  # se queda en inglés
+    print(f"Traducción: {ok} correctos, {fail} sin traducir")
     return items
 
 
