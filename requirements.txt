@@ -1,5 +1,2 @@
 streamlit
-requests
-deep-translator
 feedparser
-pytz
