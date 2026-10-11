@@ -40,7 +40,7 @@ CATEGORIES = {
     ],
 }
 # ==========================================
-# ESTILOS
+# DISEÑO
 # ==========================================
 st.markdown("""
 <style>
@@ -49,8 +49,8 @@ st.markdown("""
     color: #e6edf7;
 }
 .block-container {
-    max-width: 1250px;
-    padding-top: 2rem;
+    max-width: 1200px;
+    padding-top: 1.5rem;
     padding-bottom: 3rem;
 }
 [data-testid="stSidebar"] {
@@ -60,13 +60,13 @@ st.markdown("""
 .hero {
     background: linear-gradient(120deg, #101d31, #0b302d);
     border: 1px solid #24453f;
-    padding: 28px;
+    padding: 24px;
     border-radius: 18px;
-    margin-bottom: 24px;
+    margin-bottom: 22px;
 }
 .hero h1 {
     color: #f1f7ff;
-    font-size: 2.5rem;
+    font-size: 2.2rem;
     margin: 0;
 }
 .hero p {
@@ -76,22 +76,26 @@ st.markdown("""
 .metric {
     background: #101827;
     border: 1px solid #223147;
-    padding: 18px;
+    padding: 15px;
     border-radius: 14px;
-    min-height: 95px;
+    min-height: 90px;
 }
 .metric-label {
     color: #9bacbf;
-    font-size: .9rem;
+    font-size: .85rem;
 }
 .metric-value {
     color: #65e6bd;
-    font-size: 1.7rem;
+    font-size: 1.6rem;
     font-weight: 700;
 }
 .news-meta {
     color: #91a5bc;
     font-size: .85rem;
+}
+div.stButton > button,
+div.stLinkButton > a {
+    border-radius: 9px;
 }
 a {
     color: #65e6bd !important;
@@ -105,7 +109,6 @@ footer {
 # FUNCIONES AUXILIARES
 # ==========================================
 def clean_text(value):
-    """Convierte HTML de RSS en texto legible."""
     value = re.sub(r"<[^>]*>", " ", value or "")
     value = html.unescape(value)
     return re.sub(r"\s+", " ", value).strip()
@@ -144,7 +147,6 @@ def format_date(value):
 # ==========================================
 @st.cache_data(ttl=86400, show_spinner=False)
 def translate_to_spanish(text):
-    """Traduce texto al español y conserva el original si falla."""
     if not text or not text.strip():
         return text
     try:
@@ -152,12 +154,15 @@ def translate_to_spanish(text):
             source="auto",
             target="es",
         )
-        translated = translator.translate(text[:4500])
-        return translated or text
+        translated = translator.translate(text[:4000])
+        if translated and translated.strip():
+            return translated.strip()
     except Exception:
-        return text
+        pass
+    # Si falla la traducción, conserva el original.
+    return text
 # ==========================================
-# CARGA DE NOTICIAS
+# CARGA RSS
 # ==========================================
 @st.cache_data(ttl=600, show_spinner=False)
 def load_news(source_names):
@@ -193,10 +198,10 @@ def load_news(source_names):
                     )
                 )
                 articles.append({
-                    "title": title,
                     "original_title": title,
-                    "summary": summary[:1000],
                     "original_summary": summary[:1000],
+                    "title": title,
+                    "summary": summary[:1000],
                     "link": link,
                     "source": source_name,
                     "published": parse_date(entry),
@@ -213,7 +218,6 @@ def load_news(source_names):
     for article in articles:
         unique[article["link"]] = article
     result = list(unique.values())
-    # Primero, las noticias con fecha más reciente
     result.sort(
         key=lambda item: (
             item["published"] is not None,
@@ -229,7 +233,7 @@ def load_news(source_names):
 # ==========================================
 with st.sidebar:
     st.markdown("## 🛡️ CyberFeed")
-    st.caption("CONDORHACKS · INTELIGENCIA DE CIBERSEGURIDAD")
+    st.caption("CONDORHACKS · CIBERSEGURIDAD")
     st.divider()
     selected_sources = st.multiselect(
         "Fuentes de noticias",
@@ -250,18 +254,15 @@ with st.sidebar:
         placeholder="CVE, ransomware, phishing...",
     ).strip().lower()
     max_articles = st.selectbox(
-        "Noticias por página",
+        "Noticias mostradas",
         [5, 10, 20, 30],
         index=1,
     )
     st.divider()
-    if st.button(
-        "🔄 Actualizar noticias",
-        use_container_width=True,
-    ):
+    if st.button("🔄 Actualizar noticias", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    st.caption("Noticias RSS · Caché de 10 minutos")
+    st.caption("Fuentes RSS internacionales")
     st.caption("Traducción automática al español")
 # ==========================================
 # CABECERA
@@ -271,13 +272,12 @@ st.markdown("""
     <h1>CyberFeed <span style="color:#65e6bd">/</span> Dashboard</h1>
     <p>
         Noticias de ciberseguridad en español.
-        <br>
         Amenazas, vulnerabilidades e investigación en un solo lugar.
     </p>
 </div>
 """, unsafe_allow_html=True)
 # ==========================================
-# CONSULTAR NOTICIAS
+# OBTENER NOTICIAS
 # ==========================================
 if not selected_sources:
     st.info("Selecciona al menos una fuente en el menú lateral.")
@@ -285,83 +285,70 @@ if not selected_sources:
 with st.spinner("Consultando fuentes de ciberseguridad..."):
     articles, statuses = load_news(tuple(selected_sources))
 # ==========================================
-# FILTROS
+# FILTRAR ANTES DE TRADUCIR
 # ==========================================
 if selected_category != "Todas":
     articles = [
-        article for article in articles
-        if article["category"] == selected_category
+        a for a in articles
+        if a["category"] == selected_category
     ]
 if search_query:
     articles = [
-        article for article in articles
-        if search_query in article["title"].lower()
-        or search_query in article["summary"].lower()
-        or search_query in article["source"].lower()
-        or search_query in article["category"].lower()
+        a for a in articles
+        if search_query in a["original_title"].lower()
+        or search_query in a["original_summary"].lower()
+        or search_query in a["source"].lower()
+        or search_query in a["category"].lower()
     ]
 total_found = len(articles)
-# ==========================================
-# MÉTRICAS
-# ==========================================
 working_sources = sum(
     1 for status in statuses.values()
     if status.endswith("noticias")
 )
+# ==========================================
+# MÉTRICAS
+# ==========================================
 c1, c2, c3 = st.columns(3)
 with c1:
     st.markdown(
-        f"""
-        <div class="metric">
-            <div class="metric-label">Noticias encontradas</div>
-            <div class="metric-value">{total_found}</div>
-        </div>
-        """,
+        f'<div class="metric">'
+        f'<div class="metric-label">Noticias encontradas</div>'
+        f'<div class="metric-value">{total_found}</div></div>',
         unsafe_allow_html=True,
     )
 with c2:
     st.markdown(
-        f"""
-        <div class="metric">
-            <div class="metric-label">Fuentes con resultados</div>
-            <div class="metric-value">
-                {working_sources}/{len(selected_sources)}
-            </div>
-        </div>
-        """,
+        f'<div class="metric">'
+        f'<div class="metric-label">Fuentes con resultados</div>'
+        f'<div class="metric-value">'
+        f'{working_sources}/{len(selected_sources)}'
+        f'</div></div>',
         unsafe_allow_html=True,
     )
 with c3:
     st.markdown(
-        f"""
-        <div class="metric">
-            <div class="metric-label">Última consulta</div>
-            <div class="metric-value">
-                {datetime.now().strftime("%H:%M")}
-            </div>
-        </div>
-        """,
+        f'<div class="metric">'
+        f'<div class="metric-label">Hora de consulta</div>'
+        f'<div class="metric-value">'
+        f'{datetime.now().strftime("%H:%M")}'
+        f'</div></div>',
         unsafe_allow_html=True,
     )
-# ==========================================
-# ESTADO DE LAS FUENTES
-# ==========================================
+st.write("")
 with st.expander("Estado de las fuentes RSS"):
     for name, status in statuses.items():
         st.write(f"**{name}:** {status}")
 # ==========================================
-# NOTICIAS TRADUCIDAS
+# MOSTRAR NOTICIAS EN ESPAÑOL
 # ==========================================
 st.subheader("📰 Noticias de ciberseguridad")
 if not articles:
     st.info(
-        "No hay noticias para estos filtros. "
-        "Prueba otra categoría o actualiza las fuentes."
+        "No hay noticias con estos filtros. "
+        "Prueba otra categoría o cambia la búsqueda."
     )
 else:
     visible_articles = articles[:max_articles]
-    # Traducir solo las noticias visibles para evitar
-    # traducir decenas de artículos que no se muestran.
     with st.spinner("Traduciendo noticias al español..."):
         for article in visible_articles:
             article["title"] = translate_to_spanish(
@@ -371,35 +358,36 @@ else:
                 article["original_summary"]
             )
     for index, article in enumerate(visible_articles):
-        with st.container(border=True):
+        # Sin contenedores con borde adicional para evitar
+        # los rectángulos vacíos que aparecían en el móvil.
+        st.caption(
+            f"{article['source']} · "
+            f"{article['category']} · "
+            f"{format_date(article['published'])}"
+        )
+        st.markdown(f"### {article['title']}")
+        if article["summary"]:
+            st.write(article["summary"])
+        st.link_button(
+            "Leer noticia original ↗",
+            article["link"],
+            key=f"article_{index}",
+        )
+        if (
+            article["title"] == article["original_title"]
+            and article["summary"] == article["original_summary"]
+        ):
             st.caption(
-                f"{article['source']} · "
-                f"{article['category']} · "
-                f"{format_date(article['published'])}"
+                "Aviso: la traducción no estuvo disponible; "
+                "se muestra el contenido original."
             )
-            st.subheader(article["title"])
-            if article["summary"]:
-                st.write(article["summary"])
-            st.link_button(
-                "Leer artículo original ↗",
-                article["link"],
-                key=f"article_{index}",
-            )
-            if (
-                article["title"] == article["original_title"]
-                and article["summary"] == article["original_summary"]
-            ):
-                st.caption(
-                    "La traducción no estuvo disponible; "
-                    "se muestra el texto original."
-                )
+        if index < len(visible_articles) - 1:
+            st.divider()
 # ==========================================
 # PIE DE PÁGINA
 # ==========================================
 st.divider()
 st.caption(
-    "CyberFeed · CondorHacks | "
-    "Las noticias proceden de fuentes externas. "
-    "Las traducciones son automáticas; consulta el original "
-    "para confirmar detalles técnicos."
+    "CyberFeed · CondorHacks | Traducción automática. "
+    "Consulta la fuente original para verificar los detalles técnicos."
 )
