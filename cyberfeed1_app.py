@@ -1,129 +1,167 @@
 
-import re
 import html
-import threading
-from datetime import timezone
-from email.utils import parsedate_to_datetime
+import re
+from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import feedparser
 import requests
 import streamlit as st
 
-import argostranslate.package
-import argostranslate.translate
 
-
-# ==================================================
-# CONFIGURACIÓN
-# ==================================================
+# --------------------------------------------------
+# PAGE CONFIGURATION
+# --------------------------------------------------
 
 st.set_page_config(
-    page_title="CyberFeed | Ciberseguridad",
+    page_title="CyberFeed | Cybersecurity Intelligence",
     page_icon="🛡️",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-FUENTES = {
-    "The Hacker News": "https://feeds.feedburner.com/TheHackerNews",
+
+# --------------------------------------------------
+# RSS SOURCES
+# --------------------------------------------------
+
+RSS_SOURCES = {
+    "The Hacker News": "https://feeds.feedburner.com/TheHackersNews",
     "Krebs on Security": "https://krebsonsecurity.com/feed/",
     "BleepingComputer": "https://www.bleepingcomputer.com/feed/",
     "Dark Reading": "https://www.darkreading.com/rss.xml",
 }
 
-CATEGORIAS = [
-    "Todas",
-    "Vulnerabilidades",
+CATEGORIES = [
+    "All",
+    "Vulnerabilities",
     "Malware",
     "Hacking",
-    "Inteligencia artificial",
+    "Artificial Intelligence",
+    "Data Breaches",
     "General",
 ]
 
-# Evita intentar instalar el modelo varias veces simultáneamente.
-argos_lock = threading.Lock()
 
-
-# ==================================================
-# ESTILOS
-# ==================================================
+# --------------------------------------------------
+# STYLING
+# --------------------------------------------------
 
 st.markdown(
     """
     <style>
     .stApp {
-        background-color: #07111f;
-        color: #e8f0fb;
-    }
-
-    [data-testid="stHeader"] {
-        background: rgba(7,17,31,.95);
+        background-color: #0b1220;
+        color: #e5edf7;
     }
 
     [data-testid="stSidebar"] {
-        background-color: #0b1829;
+        background-color: #101a2b;
+        border-right: 1px solid #243449;
     }
 
     h1, h2, h3 {
-        color: #f2f7ff;
+        color: #eaf2ff;
     }
 
-    .cf-subtitle {
-        color: #93a9c4;
-        font-size: 1rem;
-        margin-top: -10px;
-        margin-bottom: 24px;
+    .hero {
+        padding: 22px 24px;
+        border-radius: 16px;
+        background: linear-gradient(120deg, #10263c, #123b46);
+        border: 1px solid #245365;
+        margin-bottom: 20px;
     }
 
-    .cf-tag {
-        display: inline-block;
-        padding: 4px 9px;
-        border-radius: 6px;
-        margin-bottom: 8px;
-        color: #62e6ce;
-        background: #10312f;
-        font-size: .78rem;
-        font-weight: 600;
+    .hero-title {
+        font-size: 32px;
+        font-weight: 800;
+        color: #f0f9ff;
+        margin-bottom: 5px;
     }
 
-    .cf-source {
-        color: #91a6bf;
-        font-size: .82rem;
-        margin-bottom: 8px;
+    .hero-subtitle {
+        font-size: 14px;
+        color: #b5cadb;
     }
 
-    .cf-title {
-        color: #f2f7ff;
-        font-size: 1.18rem;
-        line-height: 1.5;
+    .news-card {
+        background-color: #111c2e;
+        border: 1px solid #26374e;
+        border-radius: 12px;
+        padding: 18px;
+        margin-bottom: 14px;
+    }
+
+    .news-title {
+        font-size: 19px;
+        line-height: 1.4;
         font-weight: 700;
-        margin-bottom: 9px;
+        margin-bottom: 10px;
     }
 
-    .cf-summary {
-        color: #c1cde0;
-        font-size: .96rem;
+    .news-title a {
+        color: #70d6d1 !important;
+        text-decoration: none;
+    }
+
+    .news-title a:hover {
+        color: #a5f3fc !important;
+        text-decoration: underline;
+    }
+
+    .news-meta {
+        color: #9aadc4;
+        font-size: 12px;
+        margin-bottom: 12px;
+    }
+
+    .news-summary {
+        color: #d2dceb;
+        font-size: 14px;
         line-height: 1.65;
     }
 
-    .cf-date {
-        color: #7f96b2;
-        font-size: .8rem;
-        margin-top: 10px;
+    .category-tag {
+        display: inline-block;
+        background: #173b4a;
+        color: #8ce8e0;
+        padding: 4px 9px;
+        border-radius: 20px;
+        font-size: 11px;
+        margin-bottom: 10px;
     }
 
-    a {
-        color: #57dcca !important;
+    .source-tag {
+        display: inline-block;
+        background: #202e42;
+        color: #bdcde0;
+        padding: 4px 9px;
+        border-radius: 20px;
+        font-size: 11px;
+        margin-right: 5px;
+    }
+
+    .status-text {
+        color: #9aadc4;
+        font-size: 12px;
     }
 
     div[data-testid="stMetric"] {
-        background: #0d1b2d;
+        background: #111c2e;
+        border: 1px solid #26374e;
         padding: 14px;
-        border: 1px solid #1b3047;
         border-radius: 12px;
     }
 
-    hr {
-        border-color: #1b3047;
+    div[data-testid="stMetricValue"] {
+        color: #70d6d1;
+    }
+
+    .footer {
+        color: #8194ab;
+        font-size: 12px;
+        text-align: center;
+        padding: 22px 0;
     }
     </style>
     """,
@@ -131,538 +169,447 @@ st.markdown(
 )
 
 
-# ==================================================
-# INSTALAR Y PREPARAR ARGOS
-# ==================================================
+# --------------------------------------------------
+# HELPERS
+# --------------------------------------------------
 
-@st.cache_resource(show_spinner=False)
-def preparar_traductor():
-    with argos_lock:
-        # Comprobar si el modelo inglés-español ya está instalado.
-        idiomas = argostranslate.translate.get_installed_languages()
-
-        ingles = next(
-            (idioma for idioma in idiomas if idioma.code == "en"),
-            None,
-        )
-
-        espanol = next(
-            (idioma for idioma in idiomas if idioma.code == "es"),
-            None,
-        )
-
-        if ingles and espanol:
-            traduccion = ingles.get_translation(espanol)
-            if traduccion:
-                return traduccion
-
-        # Descargar el índice oficial de modelos.
-        argostranslate.package.update_package_index()
-
-        paquetes = argostranslate.package.get_available_packages()
-
-        paquete = next(
-            (
-                p for p in paquetes
-                if p.from_code == "en" and p.to_code == "es"
-            ),
-            None,
-        )
-
-        if paquete is None:
-            raise RuntimeError(
-                "No se encontró el modelo de traducción inglés-español."
-            )
-
-        archivo_modelo = paquete.download()
-        argostranslate.package.install_from_path(archivo_modelo)
-
-        idiomas = argostranslate.translate.get_installed_languages()
-
-        ingles = next(
-            (idioma for idioma in idiomas if idioma.code == "en"),
-            None,
-        )
-
-        espanol = next(
-            (idioma for idioma in idiomas if idioma.code == "es"),
-            None,
-        )
-
-        if not ingles or not espanol:
-            raise RuntimeError(
-                "El modelo se descargó, pero no se pudo cargar."
-            )
-
-        traduccion = ingles.get_translation(espanol)
-
-        if traduccion is None:
-            raise RuntimeError(
-                "No se pudo preparar la traducción inglés-español."
-            )
-
-        return traduccion
-
-
-# ==================================================
-# TRADUCCIÓN LOCAL
-# ==================================================
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def traducir_espanol(texto):
-    if not texto or not texto.strip():
-        return texto
-
-    try:
-        traductor = preparar_traductor()
-        return traductor.translate(texto[:3000])
-    except Exception:
-        return texto
-
-
-def traducir_noticia(titulo, resumen):
-    separador = "\n\n"
-
-    if resumen:
-        combinado = titulo + separador + resumen[:800]
-    else:
-        combinado = titulo
-
-    resultado = traducir_espanol(combinado)
-
-    if resultado == combinado:
-        return titulo, resumen, False
-
-    partes = resultado.split(separador, 1)
-    titulo_es = partes[0].strip()
-
-    resumen_es = (
-        partes[1].strip()
-        if len(partes) > 1
-        else resumen
-    )
-
-    return titulo_es or titulo, resumen_es or resumen, True
-
-
-# ==================================================
-# LIMPIEZA RSS
-# ==================================================
-
-def limpiar_html(texto):
-    if not texto:
+def clean_text(value):
+    """Convert feed HTML into readable plain text."""
+    if not value:
         return ""
 
-    texto = re.sub(
-        r"<script.*?</script>",
+    value = re.sub(
+        r"(?is)<(script|style).*?>.*?</\1>",
         " ",
-        texto,
-        flags=re.IGNORECASE | re.DOTALL,
+        str(value),
+    )
+    value = re.sub(r"(?i)<br\s*/?>", " ", value)
+    value = re.sub(r"(?i)</p\s*>", " ", value)
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = html.unescape(value)
+    value = re.sub(r"\s+", " ", value)
+
+    return value.strip()
+
+
+def get_entry_date(entry):
+    """Return a readable publication date when available."""
+    parsed = entry.get("published_parsed") or entry.get(
+        "updated_parsed"
     )
 
-    texto = re.sub(
-        r"<style.*?</style>",
-        " ",
-        texto,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
+    if parsed:
+        try:
+            return datetime(
+                parsed.tm_year,
+                parsed.tm_mon,
+                parsed.tm_mday,
+                parsed.tm_hour,
+                parsed.tm_min,
+                parsed.tm_sec,
+                tzinfo=timezone.utc,
+            ).strftime("%b %d, %Y · %H:%M UTC")
+        except (ValueError, TypeError, OverflowError):
+            pass
 
-    texto = re.sub(r"<[^>]+>", " ", texto)
-    texto = html.unescape(texto)
-    texto = re.sub(r"\s+", " ", texto)
-
-    return texto.strip()
-
-
-def obtener_fecha(entry):
-    fecha = entry.get("published") or entry.get("updated")
-
-    if not fecha:
-        return ""
-
-    try:
-        dt = parsedate_to_datetime(fecha)
-
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-
-        return dt.strftime("%d/%m/%Y %H:%M UTC")
-
-    except (TypeError, ValueError, OverflowError):
-        return str(fecha)
+    return "Date unavailable"
 
 
-# ==================================================
-# CATEGORÍAS
-# ==================================================
+def categorize_article(title, summary):
+    """Assign a category using simple keyword matching."""
+    text = f"{title} {summary}".lower()
 
-def categorizar(texto):
-    texto = f" {texto.lower()} "
+    rules = [
+        (
+            "Artificial Intelligence",
+            [
+                "artificial intelligence",
+                "generative ai",
+                "machine learning",
+                "large language model",
+                "chatgpt",
+                "openai",
+                "deepfake",
+                "ai model",
+            ],
+        ),
+        (
+            "Data Breaches",
+            [
+                "data breach",
+                "data leak",
+                "exposed database",
+                "stolen data",
+                "customer records",
+                "personal information",
+                "ransomware leak",
+            ],
+        ),
+        (
+            "Vulnerabilities",
+            [
+                "vulnerability",
+                "vulnerabilities",
+                "zero-day",
+                "zero day",
+                "cve-",
+                "security flaw",
+                "patch",
+                "remote code execution",
+                "privilege escalation",
+                "exploit",
+            ],
+        ),
+        (
+            "Malware",
+            [
+                "malware",
+                "ransomware",
+                "trojan",
+                "spyware",
+                "botnet",
+                "infostealer",
+                "backdoor",
+                "rootkit",
+                "worm",
+                "keylogger",
+            ],
+        ),
+        (
+            "Hacking",
+            [
+                "hacker",
+                "hackers",
+                "hacking",
+                "cyberattack",
+                "cyber attack",
+                "phishing",
+                "credential theft",
+                "cyber espionage",
+                "threat actor",
+                "attack campaign",
+            ],
+        ),
+    ]
 
-    grupos = {
-        "Vulnerabilidades": [
-            "vulnerability", "vulnerabilities",
-            "vulnerabilidad", "cve-", "zero-day",
-            "zero day", "security flaw", "exploit",
-            "security patch",
-        ],
-        "Malware": [
-            "malware", "ransomware", "trojan",
-            "stealer", "botnet", "spyware",
-            "infostealer", "backdoor", "phishing",
-        ],
-        "Inteligencia artificial": [
-            "artificial intelligence", "machine learning",
-            "generative ai", "chatgpt", "openai",
-            "large language model", "llm",
-        ],
-        "Hacking": [
-            "hacker", "hacking", "cyberattack",
-            "cyber attack", "data breach", "data leak",
-            "hacked", "attackers",
-        ],
-    }
-
-    for categoria, palabras in grupos.items():
-        if any(p in texto for p in palabras):
-            return categoria
+    for category, keywords in rules:
+        if any(keyword in text for keyword in keywords):
+            return category
 
     return "General"
 
 
-# ==================================================
-# CARGAR NOTICIAS
-# ==================================================
+def get_summary(entry):
+    """Get a summary from the available feed fields."""
+    summary = entry.get("summary", "")
+
+    if not summary and entry.get("description"):
+        summary = entry.get("description", "")
+
+    if not summary and entry.get("content"):
+        try:
+            summary = entry["content"][0].get("value", "")
+        except (IndexError, KeyError, TypeError):
+            summary = ""
+
+    summary = clean_text(summary)
+
+    if len(summary) > 650:
+        summary = summary[:647].rsplit(" ", 1)[0] + "..."
+
+    return summary or "No summary is available for this article."
+
+
+# --------------------------------------------------
+# RSS FETCHING
+# --------------------------------------------------
 
 @st.cache_data(ttl=600, show_spinner=False)
-def cargar_noticias(fuentes_seleccionadas):
-    noticias = []
-    errores = []
+def fetch_news():
+    """Fetch articles from all configured RSS sources."""
+    articles = []
+    source_status = {}
+    seen_urls = set()
 
-    for fuente in fuentes_seleccionadas:
-        url = FUENTES.get(fuente)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (compatible; CyberFeed/1.0; "
+            "+https://github.com/condorhacks777/cyberfeed)"
+        ),
+        "Accept": (
+            "application/rss+xml, application/xml, "
+            "text/xml, application/atom+xml, */*"
+        ),
+    }
 
-        if not url:
-            continue
-
+    for source_name, feed_url in RSS_SOURCES.items():
         try:
-            respuesta = requests.get(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; CyberFeed/1.0)"
-                },
-                timeout=12,
+            response = requests.get(
+                feed_url,
+                headers=headers,
+                timeout=15,
             )
+            response.raise_for_status()
 
-            respuesta.raise_for_status()
-            feed = feedparser.parse(respuesta.content)
+            feed = feedparser.parse(response.content)
 
             if not feed.entries:
-                errores.append(fuente)
+                source_status[source_name] = "No articles returned"
                 continue
 
+            added_count = 0
+
             for entry in feed.entries:
-                titulo = limpiar_html(
-                    entry.get("title", "Sin título")
-                )
+                title = clean_text(entry.get("title", ""))
+                link = entry.get("link", "").strip()
 
-                resumen = limpiar_html(
-                    entry.get("summary")
-                    or entry.get("description")
-                    or ""
-                )
-
-                enlace = entry.get("link", "")
-
-                if not titulo or not enlace:
+                if not title or not link:
                     continue
 
-                noticias.append({
-                    "fuente": fuente,
-                    "titulo_original": titulo,
-                    "resumen_original": resumen,
-                    "enlace": enlace,
-                    "categoria": categorizar(titulo + " " + resumen),
-                    "fecha": obtener_fecha(entry),
-                })
+                parsed_url = urlparse(link)
 
-        except (requests.RequestException, ValueError):
-            errores.append(fuente)
+                if parsed_url.scheme not in ("http", "https"):
+                    continue
 
-    unicas = []
-    vistos = set()
+                normalized_url = link.split("#", 1)[0]
 
-    for noticia in noticias:
-        if noticia["enlace"] not in vistos:
-            vistos.add(noticia["enlace"])
-            unicas.append(noticia)
+                if normalized_url in seen_urls:
+                    continue
 
-    return unicas, errores
+                seen_urls.add(normalized_url)
+
+                summary = get_summary(entry)
+
+                articles.append(
+                    {
+                        "title": title,
+                        "link": link,
+                        "summary": summary,
+                        "source": source_name,
+                        "category": categorize_article(
+                            title, summary
+                        ),
+                        "date": get_entry_date(entry),
+                        "published_timestamp": (
+                            entry.get("published_parsed")
+                            or entry.get("updated_parsed")
+                        ),
+                    }
+                )
+
+                added_count += 1
+
+            source_status[source_name] = (
+                f"{added_count} articles loaded"
+            )
+
+        except requests.RequestException as exc:
+            source_status[source_name] = (
+                f"Connection error: {type(exc).__name__}"
+            )
+
+        except Exception as exc:
+            source_status[source_name] = (
+                f"Feed error: {type(exc).__name__}"
+            )
+
+    # Sort newest first when RSS publication dates are available.
+    articles.sort(
+        key=lambda article: (
+            article["published_timestamp"] is not None,
+            article["published_timestamp"] or (),
+        ),
+        reverse=True,
+    )
+
+    return articles, source_status
 
 
-# ==================================================
-# CABECERA
-# ==================================================
-
-st.title("🛡️ CyberFeed")
+# --------------------------------------------------
+# HEADER
+# --------------------------------------------------
 
 st.markdown(
-    '<div class="cf-subtitle">'
-    "Tu panel de noticias de ciberseguridad, vulnerabilidades y amenazas."
-    "</div>",
+    """
+    <div class="hero">
+        <div class="hero-title">🛡️ CyberFeed</div>
+        <div class="hero-subtitle">
+            Cybersecurity news, threat intelligence,
+            vulnerabilities and emerging attacks — all in one place.
+        </div>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
-col_info, col_refresh = st.columns([3, 1])
 
-with col_info:
-    st.caption(
-        "Fuentes RSS · Traducción local inglés-español con Argos Translate"
+# --------------------------------------------------
+# SIDEBAR
+# --------------------------------------------------
+
+with st.sidebar:
+    st.markdown("## ⚙️ Dashboard Settings")
+    st.markdown("---")
+
+    selected_category = st.selectbox(
+        "Category",
+        CATEGORIES,
+        index=0,
     )
 
-with col_refresh:
-    if st.button("🔄 Actualizar noticias", use_container_width=True):
-        cargar_noticias.clear()
+    selected_sources = st.multiselect(
+        "News Sources",
+        options=list(RSS_SOURCES.keys()),
+        default=list(RSS_SOURCES.keys()),
+    )
+
+    search_query = st.text_input(
+        "Search articles",
+        placeholder="Search keywords...",
+    )
+
+    st.markdown("---")
+
+    if st.button(
+        "🔄 Refresh News",
+        use_container_width=True,
+    ):
+        fetch_news.clear()
         st.rerun()
 
-
-# ==================================================
-# BARRA LATERAL
-# ==================================================
-
-st.sidebar.title("⚙️ Configuración")
-
-fuentes_seleccionadas = st.sidebar.multiselect(
-    "Fuentes de noticias",
-    options=list(FUENTES.keys()),
-    default=list(FUENTES.keys()),
-)
-
-categoria_seleccionada = st.sidebar.selectbox(
-    "Categoría",
-    CATEGORIAS,
-)
-
-buscar = st.sidebar.text_input(
-    "Buscar noticias",
-    placeholder="Ransomware, CVE, phishing...",
-)
-
-max_noticias = st.sidebar.slider(
-    "Noticias por página",
-    min_value=5,
-    max_value=20,
-    value=5,
-    step=5,
-)
-
-st.sidebar.caption(
-    "Argos Translate funciona localmente después de instalar su modelo."
-)
+    st.caption("Feed cache: 10 minutes")
+    st.caption("Translation: disabled")
+    st.caption("Articles remain in their original language.")
 
 
-# ==================================================
-# PREPARAR TRADUCTOR
-# ==================================================
+# --------------------------------------------------
+# LOAD ARTICLES
+# --------------------------------------------------
 
-try:
-    with st.spinner(
-        "Preparando el traductor local. La primera carga puede tardar..."
-    ):
-        preparar_traductor()
-
-    traductor_disponible = True
-
-except Exception as error:
-    traductor_disponible = False
-
-    st.error(
-        "No se pudo instalar o iniciar el traductor local. "
-        "Comprueba los registros de Streamlit Cloud."
-    )
-
-    with st.expander("Detalles del error"):
-        st.code(str(error)[:2000])
+with st.spinner("Loading cybersecurity news..."):
+    articles, source_status = fetch_news()
 
 
-# ==================================================
-# CONSULTAR FUENTES
-# ==================================================
+# --------------------------------------------------
+# FILTER ARTICLES
+# --------------------------------------------------
 
-if not fuentes_seleccionadas:
-    st.info("Selecciona al menos una fuente.")
-    st.stop()
+filtered_articles = []
 
-with st.spinner("Consultando fuentes RSS..."):
-    noticias, errores = cargar_noticias(tuple(fuentes_seleccionadas))
-
-if errores:
-    st.warning(
-        "No se pudieron consultar estas fuentes: "
-        + ", ".join(errores)
-    )
-
-if not noticias:
-    st.error("No se han podido cargar noticias. Inténtalo más tarde.")
-    st.stop()
-
-
-# ==================================================
-# FILTROS
-# ==================================================
-
-noticias_filtradas = []
-
-for noticia in noticias:
+for article in articles:
     if (
-        categoria_seleccionada != "Todas"
-        and noticia["categoria"] != categoria_seleccionada
+        selected_category != "All"
+        and article["category"] != selected_category
     ):
         continue
 
-    texto = (
-        noticia["titulo_original"]
-        + " "
-        + noticia["resumen_original"]
-    ).lower()
-
-    if buscar and buscar.strip().lower() not in texto:
+    if article["source"] not in selected_sources:
         continue
 
-    noticias_filtradas.append(noticia)
+    if search_query:
+        searchable_text = (
+            article["title"] + " " + article["summary"]
+        ).lower()
+
+        if search_query.lower() not in searchable_text:
+            continue
+
+    filtered_articles.append(article)
 
 
-# ==================================================
-# MÉTRICAS
-# ==================================================
+# --------------------------------------------------
+# DASHBOARD METRICS
+# --------------------------------------------------
 
-m1, m2, m3 = st.columns(3)
+metric_col1, metric_col2, metric_col3 = st.columns(3)
 
-m1.metric("Noticias recopiladas", len(noticias))
-m2.metric("Resultados filtrados", len(noticias_filtradas))
-m3.metric("Fuentes seleccionadas", len(fuentes_seleccionadas))
+with metric_col1:
+    st.metric("Articles Loaded", len(articles))
 
-st.divider()
+with metric_col2:
+    st.metric("Matching Articles", len(filtered_articles))
 
-
-# ==================================================
-# MOSTRAR NOTICIAS
-# ==================================================
-
-if not noticias_filtradas:
-    st.info("No hay noticias que coincidan con los filtros.")
-    st.stop()
-
-noticias_a_mostrar = noticias_filtradas[:max_noticias]
-
-st.subheader("📰 Últimas noticias")
-
-st.caption(
-    f"Mostrando {len(noticias_a_mostrar)} de "
-    f"{len(noticias_filtradas)} resultados."
-)
-
-fallos = 0
-
-for noticia in noticias_a_mostrar:
-    st.markdown(
-        f'<span class="cf-tag">'
-        f'{html.escape(noticia["categoria"])}</span>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        f'<div class="cf-source">'
-        f'{html.escape(noticia["fuente"])}</div>',
-        unsafe_allow_html=True,
-    )
-
-    if traductor_disponible:
-        titulo_es, resumen_es, traduccion_ok = traducir_noticia(
-            noticia["titulo_original"],
-            noticia["resumen_original"],
-        )
-
-        if not traduccion_ok:
-            fallos += 1
-    else:
-        titulo_es = noticia["titulo_original"]
-        resumen_es = noticia["resumen_original"]
-        fallos += 1
-
-    st.markdown(
-        f'<div class="cf-title">'
-        f'{html.escape(titulo_es)}</div>',
-        unsafe_allow_html=True,
-    )
-
-    if resumen_es:
-        st.markdown(
-            f'<div class="cf-summary">'
-            f'{html.escape(resumen_es)}</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.caption("La fuente no proporciona un resumen.")
-
-    if noticia["fecha"]:
-        st.markdown(
-            f'<div class="cf-date">'
-            f'🕒 {html.escape(noticia["fecha"])}</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown(
-        f'[Leer noticia original ↗]({noticia["enlace"]})'
-    )
-
-    st.divider()
+with metric_col3:
+    st.metric("Active Sources", len(selected_sources))
 
 
-# ==================================================
-# ESTADO
-# ==================================================
+# --------------------------------------------------
+# SOURCE STATUS
+# --------------------------------------------------
 
-if not traductor_disponible:
+with st.expander("📡 RSS Source Status"):
+    for source_name, status in source_status.items():
+        st.markdown(f"**{source_name}:** {status}")
+
+
+# --------------------------------------------------
+# NEWS FEED
+# --------------------------------------------------
+
+st.markdown("## 📰 Latest Cybersecurity News")
+
+if not selected_sources:
+    st.info("Select at least one news source in the sidebar.")
+
+elif not filtered_articles:
     st.warning(
-        "Se muestran los textos originales porque el traductor "
-        "no está disponible."
+        "No articles match your filters. "
+        "Try another category or search term."
     )
-elif fallos:
-    st.warning(
-        f"{fallos} noticias no pudieron traducirse correctamente."
-    )
+
 else:
-    st.success("Traducción local disponible.")
-    
-
-# ==================================================
-# PRUEBA DEL TRADUCTOR
-# ==================================================
-
-with st.expander("🧪 Probar traducción local"):
-    frase = st.text_input(
-        "Frase de prueba en inglés",
-        value="Hackers discovered a new security vulnerability.",
-        key="argos_test",
+    st.caption(
+        f"Showing {len(filtered_articles)} article(s). "
+        "Open any headline to read the original article."
     )
 
-    if st.button("Traducir frase"):
-        if not traductor_disponible:
-            st.error("El traductor local no está disponible.")
-        elif not frase.strip():
-            st.warning("Escribe una frase.")
-        else:
-            resultado = traducir_espanol(frase)
-            st.write("**Resultado:**")
-            st.write(resultado)
+    for article in filtered_articles:
+        safe_title = html.escape(article["title"])
+        safe_link = html.escape(article["link"], quote=True)
+        safe_summary = html.escape(article["summary"])
+        safe_source = html.escape(article["source"])
+        safe_category = html.escape(article["category"])
+        safe_date = html.escape(article["date"])
+
+        st.markdown(
+            f"""
+            <div class="news-card">
+                <span class="category-tag">
+                    {safe_category}
+                </span>
+                <span class="source-tag">
+                    {safe_source}
+                </span>
+                <div class="news-title">
+                    <a href="{safe_link}"
+                       target="_blank"
+                       rel="noopener noreferrer">
+                        {safe_title}
+                    </a>
+                </div>
+                <div class="news-meta">
+                    Published: {safe_date}
+                </div>
+                <div class="news-summary">
+                    {safe_summary}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
-# ==================================================
-# PIE
-# ==================================================
+# --------------------------------------------------
+# FOOTER
+# --------------------------------------------------
 
-st.caption(
-    "CyberFeed · Las noticias pertenecen a sus fuentes originales. "
-    "La traducción automática puede contener errores."
+st.markdown(
+    """
+    <div class="footer">
+        CyberFeed · Open-source cybersecurity news dashboard<br>
+        News content belongs to its respective publishers.
+        Follow the original links for full articles.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
