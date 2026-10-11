@@ -123,7 +123,9 @@ TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CyberFeed</title>
+<title>CyberFeed · Noticias de ciberseguridad en español</title>
+<meta name="description" content="Monitor de noticias de ciberseguridad en español: brechas, herramientas, CVEs, grupos APT y crypto. Actualizado cada hora.">
+<link rel="canonical" href="https://cyberfeed.app/">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
@@ -151,28 +153,26 @@ a{color:#00ff88;font-size:.72rem;text-decoration:none}
 <p class="sub">MONITOR DE INTELIGENCIA · actualizado __DATE__</p>
 <hr>
 <select id="cat"></select>
-<div id="list"></div>
+<div id="list">__CARDS__</div>
+<p class="empty" id="empty" hidden>Sin señales en este sector...</p>
 <p class="foot">SISTEMA ACTIVO</p>
 </main>
 <script>
-const DATA = __DATA__;
 const CATS = ["◈ TODAS", ...__CATS__];
-const sel = document.getElementById("cat"), list = document.getElementById("list");
+const LIMIT = 15;
+const sel = document.getElementById("cat"), list = document.getElementById("list"), empty = document.getElementById("empty");
 CATS.forEach(c => { const o = document.createElement("option"); o.textContent = c; sel.appendChild(o); });
-function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
+const cards = Array.from(list.querySelectorAll(".card"));
 function render() {
-  const c = sel.value;
-  const arts = DATA.filter(a => c === CATS[0] || a.cats.includes(c)).slice(0, 10);
-  list.replaceChildren();
-  if (!arts.length) { list.appendChild(el("p", "empty", "Sin señales en este sector...")); return; }
-  arts.forEach(a => {
-    const card = el("div", "card"), meta = el("div", "meta");
-    meta.append(el("span", "cat", c === CATS[0] ? (a.cats[0] || "◈") : c), el("span", "src", "🔗 " + a.source));
-    const link = el("a", "", "▶ Leer artículo completo");
-    link.href = a.url; link.target = "_blank"; link.rel = "noopener noreferrer";
-    card.append(meta, el("div", "t", a.title), el("div", "d", a.desc), link);
-    list.appendChild(card);
+  const c = sel.value, all = c === CATS[0];
+  let shown = 0;
+  cards.forEach(card => {
+    const cats = card.dataset.cats ? card.dataset.cats.split("|") : [];
+    const show = (all || cats.includes(c)) && shown < LIMIT;
+    card.hidden = !show;
+    if (show) { shown++; card.querySelector(".cat").textContent = all ? (cats[0] || "◈") : c; }
   });
+  empty.hidden = shown > 0;
 }
 sel.addEventListener("change", render);
 render();
@@ -182,18 +182,34 @@ render();
 """
 
 
+def render_cards(items):
+    """Tarjetas en HTML estático (visibles para Google y sin JavaScript)."""
+    esc = lambda s: html.escape(s or "", quote=True)
+    out = []
+    for a in items:
+        cats = a["cats"]
+        out.append(
+            f'<article class="card" data-cats="{esc("|".join(cats))}">'
+            f'<div class="meta"><span class="cat">{esc(cats[0] if cats else "◈")}</span>'
+            f'<span class="src">🔗 {esc(a["source"])}</span></div>'
+            f'<div class="t">{esc(a["title"])}</div>'
+            f'<div class="d">{esc(a["desc"])}</div>'
+            f'<a href="{esc(a["url"])}" target="_blank" rel="noopener noreferrer">▶ Leer artículo completo</a>'
+            f"</article>"
+        )
+    return "\n".join(out)
+
+
 def main():
     items = fetch_all()
     for a in items:
         a["cats"] = categorize(a)
     items = translate(items)
-    for a in items:
-        a.pop("ts", None)
     page = (
         TEMPLATE
-        .replace("__DATA__", json.dumps(items, ensure_ascii=False).replace("</", "<\\/"))
         .replace("__CATS__", json.dumps(list(CATEGORIAS.keys()), ensure_ascii=False))
         .replace("__DATE__", datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC"))
+        .replace("__CARDS__", render_cards(items))  # el último, por seguridad
     )
     out = Path("dist")
     out.mkdir(exist_ok=True)
