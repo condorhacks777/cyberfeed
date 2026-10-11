@@ -1,393 +1,556 @@
+
 import re
 import html
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from email.utils import parsedate_to_datetime
+
 import feedparser
 import requests
 import streamlit as st
-from deep_translator import GoogleTranslator
-# ==========================================
-# CYBERFEED | CONDORHACKS
-# ==========================================
+
+
+# --------------------------------------------------
+# CONFIGURACIÓN
+# --------------------------------------------------
+
 st.set_page_config(
-    page_title="CyberFeed | CondorHacks",
+    page_title="CyberFeed | Ciberseguridad",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
-SOURCES = {
+
+FUENTES = {
     "The Hacker News": "https://feeds.feedburner.com/TheHackersNews",
     "Krebs on Security": "https://krebsonsecurity.com/feed/",
     "BleepingComputer": "https://www.bleepingcomputer.com/feed/",
     "Dark Reading": "https://www.darkreading.com/rss.xml",
 }
-CATEGORIES = {
-    "Vulnerabilidades": [
-        "cve-", "vulnerability", "vulnerabilidad", "exploit",
-        "zero-day", "zero day", "patch", "parche",
-    ],
-    "Malware": [
-        "malware", "ransomware", "trojan", "botnet",
-        "infostealer", "spyware", "virus",
-    ],
-    "Hacking": [
-        "hacker", "hacking", "phishing", "cyberattack",
-        "ciberataque", "data breach", "filtración",
-    ],
-    "Inteligencia artificial": [
-        "artificial intelligence", "machine learning",
-        "inteligencia artificial", "llm",
-    ],
-}
-# ==========================================
-# DISEÑO
-# ==========================================
-st.markdown("""
-<style>
-.stApp {
-    background: #080d18;
-    color: #e6edf7;
-}
-.block-container {
-    max-width: 1200px;
-    padding-top: 1.5rem;
-    padding-bottom: 3rem;
-}
-[data-testid="stSidebar"] {
-    background: #0c1422;
-    border-right: 1px solid #223147;
-}
-.hero {
-    background: linear-gradient(120deg, #101d31, #0b302d);
-    border: 1px solid #24453f;
-    padding: 24px;
-    border-radius: 18px;
-    margin-bottom: 22px;
-}
-.hero h1 {
-    color: #f1f7ff;
-    font-size: 2.2rem;
-    margin: 0;
-}
-.hero p {
-    color: #a7bacd;
-    margin-bottom: 0;
-}
-.metric {
-    background: #101827;
-    border: 1px solid #223147;
-    padding: 15px;
-    border-radius: 14px;
-    min-height: 90px;
-}
-.metric-label {
-    color: #9bacbf;
-    font-size: .85rem;
-}
-.metric-value {
-    color: #65e6bd;
-    font-size: 1.6rem;
-    font-weight: 700;
-}
-.news-meta {
-    color: #91a5bc;
-    font-size: .85rem;
-}
-div.stButton > button,
-div.stLinkButton > a {
-    border-radius: 9px;
-}
-a {
-    color: #65e6bd !important;
-}
-footer {
-    visibility: hidden;
-}
-</style>
-""", unsafe_allow_html=True)
-# ==========================================
-# FUNCIONES AUXILIARES
-# ==========================================
-def clean_text(value):
-    value = re.sub(r"<[^>]*>", " ", value or "")
-    value = html.unescape(value)
-    return re.sub(r"\s+", " ", value).strip()
-def valid_url(url):
+
+CATEGORIAS = [
+    "Todas",
+    "Vulnerabilidades",
+    "Malware",
+    "Hacking",
+    "Inteligencia artificial",
+    "General",
+]
+
+TRADUCTORES = [
+    "https://translate.argosopentech.com/translate",
+    "https://translate.fedilab.app/translate",
+    "https://translate.cutie.dating/translate",
+]
+
+
+# --------------------------------------------------
+# ESTILOS
+# --------------------------------------------------
+
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: #07111f;
+        color: #e8f0fb;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(7, 17, 31, 0.95);
+    }
+
+    h1, h2, h3 {
+        color: #f2f7ff;
+    }
+
+    .cf-subtitle {
+        color: #93a9c4;
+        font-size: 1rem;
+        margin-top: -12px;
+        margin-bottom: 25px;
+    }
+
+    .cf-tag {
+        display: inline-block;
+        padding: 4px 9px;
+        margin-bottom: 8px;
+        border-radius: 6px;
+        color: #62e6ce;
+        background: #10312f;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .cf-source {
+        color: #91a6bf;
+        font-size: 0.82rem;
+        margin-bottom: 8px;
+    }
+
+    .cf-title {
+        color: #f2f7ff;
+        font-size: 1.18rem;
+        line-height: 1.5;
+        font-weight: 700;
+        margin-bottom: 9px;
+    }
+
+    .cf-summary {
+        color: #c1cde0;
+        font-size: 0.96rem;
+        line-height: 1.65;
+    }
+
+    .cf-date {
+        color: #7f96b2;
+        font-size: 0.8rem;
+        margin-top: 10px;
+    }
+
+    a {
+        color: #57dcca !important;
+    }
+
+    [data-testid="stSidebar"] {
+        background: #0b1829;
+    }
+
+    div[data-testid="stMetric"] {
+        background: #0d1b2d;
+        padding: 15px;
+        border: 1px solid #1b3047;
+        border-radius: 12px;
+    }
+
+    div.stButton > button {
+        border-radius: 9px;
+    }
+
+    hr {
+        border-color: #1b3047;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# --------------------------------------------------
+# LIMPIEZA DE CONTENIDO RSS
+# --------------------------------------------------
+
+def limpiar_html(texto):
+    if not texto:
+        return ""
+
+    texto = re.sub(r"<script.*?</script>", " ", texto,
+                   flags=re.IGNORECASE | re.DOTALL)
+    texto = re.sub(r"<style.*?</style>", " ", texto,
+                   flags=re.IGNORECASE | re.DOTALL)
+    texto = re.sub(r"<[^>]+>", " ", texto)
+    texto = html.unescape(texto)
+    texto = re.sub(r"\s+", " ", texto)
+
+    return texto.strip()
+
+
+def obtener_fecha(entry):
+    fecha = entry.get("published") or entry.get("updated")
+
+    if not fecha:
+        return ""
+
     try:
-        parsed = urlparse(url or "")
-        return (
-            parsed.scheme in ("https", "http")
-            and bool(parsed.netloc)
-        )
-    except ValueError:
-        return False
-def detect_category(title, summary):
-    text = f"{title} {summary}".lower()
-    for category, keywords in CATEGORIES.items():
-        if any(word in text for word in keywords):
-            return category
-    return "General"
-def parse_date(entry):
-    try:
-        parsed = (
-            entry.get("published_parsed")
-            or entry.get("updated_parsed")
-        )
-        if parsed:
-            return datetime(*parsed[:6], tzinfo=timezone.utc)
+        dt = parsedate_to_datetime(fecha)
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+
+        return dt.strftime("%d/%m/%Y %H:%M UTC")
     except (TypeError, ValueError, OverflowError):
-        pass
-    return None
-def format_date(value):
-    if not value:
-        return "Fecha no disponible"
-    return value.strftime("%d/%m/%Y %H:%M UTC")
-# ==========================================
-# TRADUCCIÓN AL ESPAÑOL
-# ==========================================
+        return str(fecha)
+
+
+# --------------------------------------------------
+# CATEGORIZACIÓN
+# --------------------------------------------------
+
+def categorizar(texto):
+    texto = texto.lower()
+
+    palabras_vulnerabilidades = [
+        "vulnerability", "vulnerabilidad", "cve-",
+        "zero-day", "zero day", "patch", "exploit",
+        "security flaw", "critical flaw", "bug",
+    ]
+
+    palabras_malware = [
+        "malware", "ransomware", "trojan", "stealer",
+        "botnet", "spyware", "infostealer", "backdoor",
+        "malicious", "phishing", "infostealing",
+    ]
+
+    palabras_hacking = [
+        "hacker", "hacking", "breach", "cyberattack",
+        "cyber attack", "data leak", "data breach",
+        "attackers", "exploited", "hacked",
+    ]
+
+    palabras_ia = [
+        "artificial intelligence", " ai ", "llm",
+        "chatgpt", "machine learning", "openai",
+        "generative ai", "language model",
+    ]
+
+    if any(p in texto for p in palabras_vulnerabilidades):
+        return "Vulnerabilidades"
+
+    if any(p in texto for p in palabras_malware):
+        return "Malware"
+
+    if any(p in texto for p in palabras_ia):
+        return "Inteligencia artificial"
+
+    if any(p in texto for p in palabras_hacking):
+        return "Hacking"
+
+    return "General"
+
+
+# --------------------------------------------------
+# TRADUCCIÓN GRATUITA CON VARIOS SERVIDORES
+# --------------------------------------------------
+
 @st.cache_data(ttl=86400, show_spinner=False)
-def translate_to_spanish(text):
-    if not text or not text.strip():
-        return text
-    try:
-        translator = GoogleTranslator(
-            source="auto",
-            target="es",
-        )
-        translated = translator.translate(text[:4000])
-        if translated and translated.strip():
-            return translated.strip()
-    except Exception:
-        pass
-    # Si falla la traducción, conserva el original.
-    return text
-# ==========================================
-# CARGA RSS
-# ==========================================
-@st.cache_data(ttl=600, show_spinner=False)
-def load_news(source_names):
-    articles = []
-    statuses = {}
-    for source_name in source_names:
-        feed_url = SOURCES.get(source_name)
-        if not feed_url:
-            continue
+def traducir_espanol(texto):
+    if not texto or not texto.strip():
+        return texto
+
+    texto = texto.strip()
+
+    # Evita enviar textos excesivamente largos al traductor.
+    texto_a_traducir = texto[:1800]
+
+    for endpoint in TRADUCTORES:
         try:
-            response = requests.get(
-                feed_url,
-                timeout=(3, 8),
-                headers={"User-Agent": "CyberFeed/1.0"},
+            respuesta = requests.post(
+                endpoint,
+                json={
+                    "q": texto_a_traducir,
+                    "source": "auto",
+                    "target": "es",
+                    "format": "text",
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "CyberFeed/1.0",
+                },
+                timeout=10,
             )
-            response.raise_for_status()
-            feed = feedparser.parse(response.content)
-            if not feed.entries:
-                statuses[source_name] = "Sin noticias disponibles"
+
+            if not respuesta.ok:
                 continue
-            before = len(articles)
+
+            resultado = respuesta.json().get("translatedText", "")
+
+            if isinstance(resultado, str) and resultado.strip():
+                resultado = resultado.strip()
+
+                # Si se recortó el texto, no descarta el resto.
+                if len(texto) > len(texto_a_traducir):
+                    return resultado + "…"
+
+                return resultado
+
+        except (
+            requests.RequestException,
+            ValueError,
+            TypeError,
+            AttributeError,
+        ):
+            continue
+
+    # La app sigue funcionando aunque fallen los traductores.
+    return texto
+
+
+# --------------------------------------------------
+# CARGA DE NOTICIAS
+# --------------------------------------------------
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cargar_noticias(fuentes_seleccionadas):
+    noticias = []
+    errores = []
+
+    for fuente in fuentes_seleccionadas:
+        url = FUENTES.get(fuente)
+
+        if not url:
+            continue
+
+        try:
+            respuesta = requests.get(
+                url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (compatible; CyberFeed/1.0)"
+                    )
+                },
+                timeout=15,
+            )
+            respuesta.raise_for_status()
+
+            feed = feedparser.parse(respuesta.content)
+
+            if not feed.entries:
+                errores.append(fuente)
+                continue
+
             for entry in feed.entries:
-                title = clean_text(
+                titulo_original = limpiar_html(
                     entry.get("title", "Sin título")
                 )
-                link = entry.get("link", "")
-                if not title or not valid_url(link):
-                    continue
-                summary = clean_text(
-                    entry.get(
-                        "summary",
-                        entry.get("description", ""),
-                    )
+
+                resumen_original = limpiar_html(
+                    entry.get("summary")
+                    or entry.get("description")
+                    or ""
                 )
-                articles.append({
-                    "original_title": title,
-                    "original_summary": summary[:1000],
-                    "title": title,
-                    "summary": summary[:1000],
-                    "link": link,
-                    "source": source_name,
-                    "published": parse_date(entry),
-                    "category": detect_category(title, summary),
+
+                enlace = entry.get("link", "")
+
+                if not titulo_original or not enlace:
+                    continue
+
+                texto_clasificacion = (
+                    titulo_original + " " + resumen_original
+                )
+
+                noticias.append({
+                    "fuente": fuente,
+                    "titulo_original": titulo_original,
+                    "resumen_original": resumen_original,
+                    "enlace": enlace,
+                    "categoria": categorizar(texto_clasificacion),
+                    "fecha": obtener_fecha(entry),
                 })
-            count = len(articles) - before
-            statuses[source_name] = f"{count} noticias"
-        except requests.RequestException:
-            statuses[source_name] = "Error de conexión"
-        except Exception:
-            statuses[source_name] = "Error al leer el feed"
-    # Eliminar duplicados
-    unique = {}
-    for article in articles:
-        unique[article["link"]] = article
-    result = list(unique.values())
-    result.sort(
-        key=lambda item: (
-            item["published"] is not None,
-            item["published"] or datetime.min.replace(
-                tzinfo=timezone.utc
-            ),
-        ),
-        reverse=True,
-    )
-    return result, statuses
-# ==========================================
-# BARRA LATERAL
-# ==========================================
-with st.sidebar:
-    st.markdown("## 🛡️ CyberFeed")
-    st.caption("CONDORHACKS · CIBERSEGURIDAD")
-    st.divider()
-    selected_sources = st.multiselect(
-        "Fuentes de noticias",
-        options=list(SOURCES.keys()),
-        default=list(SOURCES.keys()),
-    )
-    category_options = [
-        "Todas",
-        *CATEGORIES.keys(),
-        "General",
-    ]
-    selected_category = st.selectbox(
-        "Categoría",
-        category_options,
-    )
-    search_query = st.text_input(
-        "Buscar noticias",
-        placeholder="CVE, ransomware, phishing...",
-    ).strip().lower()
-    max_articles = st.selectbox(
-        "Noticias mostradas",
-        [5, 10, 20, 30],
-        index=1,
-    )
-    st.divider()
-    if st.button("🔄 Actualizar noticias", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-    st.caption("Fuentes RSS internacionales")
-    st.caption("Traducción automática al español")
-# ==========================================
+
+        except (requests.RequestException, ValueError):
+            errores.append(fuente)
+
+    # Elimina duplicados por enlace.
+    noticias_unicas = []
+    enlaces_vistos = set()
+
+    for noticia in noticias:
+        enlace = noticia["enlace"]
+
+        if enlace not in enlaces_vistos:
+            enlaces_vistos.add(enlace)
+            noticias_unicas.append(noticia)
+
+    # Ordena por fecha cuando el RSS proporciona una fecha válida.
+    # Los elementos sin fecha se mantienen al final.
+    return noticias_unicas, errores
+
+
+# --------------------------------------------------
 # CABECERA
-# ==========================================
-st.markdown("""
-<div class="hero">
-    <h1>CyberFeed <span style="color:#65e6bd">/</span> Dashboard</h1>
-    <p>
-        Noticias de ciberseguridad en español.
-        Amenazas, vulnerabilidades e investigación en un solo lugar.
-    </p>
-</div>
-""", unsafe_allow_html=True)
-# ==========================================
-# OBTENER NOTICIAS
-# ==========================================
-if not selected_sources:
+# --------------------------------------------------
+
+st.title("🛡️ CyberFeed")
+st.markdown(
+    '<div class="cf-subtitle">'
+    "Tu panel de noticias de ciberseguridad, vulnerabilidades y amenazas."
+    "</div>",
+    unsafe_allow_html=True,
+)
+
+col_a, col_b = st.columns([3, 1])
+
+with col_a:
+    st.caption(
+        "Noticias de fuentes especializadas · Traducción automática al español"
+    )
+
+with col_b:
+    if st.button("🔄 Actualizar noticias", use_container_width=True):
+        cargar_noticias.clear()
+        traducir_espanol.clear()
+        st.rerun()
+
+
+# --------------------------------------------------
+# BARRA LATERAL Y FILTROS
+# --------------------------------------------------
+
+st.sidebar.title("⚙️ Configuración")
+
+fuentes_seleccionadas = st.sidebar.multiselect(
+    "Fuentes de noticias",
+    options=list(FUENTES.keys()),
+    default=list(FUENTES.keys()),
+)
+
+categoria_seleccionada = st.sidebar.selectbox(
+    "Categoría",
+    options=CATEGORIAS,
+)
+
+buscar = st.sidebar.text_input(
+    "Buscar noticias",
+    placeholder="Ej. ransomware, CVE, phishing...",
+)
+
+max_noticias = st.sidebar.slider(
+    "Noticias por página",
+    min_value=5,
+    max_value=50,
+    value=20,
+    step=5,
+)
+
+st.sidebar.divider()
+st.sidebar.caption(
+    "CyberFeed utiliza fuentes RSS públicas y servicios de traducción "
+    "comunitarios. La disponibilidad de estos últimos puede variar."
+)
+
+
+# --------------------------------------------------
+# OBTENER Y FILTRAR NOTICIAS
+# --------------------------------------------------
+
+if not fuentes_seleccionadas:
     st.info("Selecciona al menos una fuente en el menú lateral.")
     st.stop()
-with st.spinner("Consultando fuentes de ciberseguridad..."):
-    articles, statuses = load_news(tuple(selected_sources))
-# ==========================================
-# FILTRAR ANTES DE TRADUCIR
-# ==========================================
-if selected_category != "Todas":
-    articles = [
-        a for a in articles
-        if a["category"] == selected_category
-    ]
-if search_query:
-    articles = [
-        a for a in articles
-        if search_query in a["original_title"].lower()
-        or search_query in a["original_summary"].lower()
-        or search_query in a["source"].lower()
-        or search_query in a["category"].lower()
-    ]
-total_found = len(articles)
-working_sources = sum(
-    1 for status in statuses.values()
-    if status.endswith("noticias")
-)
-# ==========================================
+
+with st.spinner("Consultando fuentes de ciberseguridad…"):
+    noticias, errores = cargar_noticias(
+        tuple(fuentes_seleccionadas)
+    )
+
+if errores:
+    st.warning(
+        "No se pudo consultar alguna fuente: "
+        + ", ".join(errores)
+        + ". Puedes intentarlo de nuevo con «Actualizar noticias»."
+    )
+
+if not noticias:
+    st.error(
+        "No se han podido cargar noticias. Comprueba la conexión "
+        "o inténtalo de nuevo más tarde."
+    )
+    st.stop()
+
+noticias_filtradas = []
+
+for noticia in noticias:
+    if (
+        categoria_seleccionada != "Todas"
+        and noticia["categoria"] != categoria_seleccionada
+    ):
+        continue
+
+    texto_busqueda = (
+        noticia["titulo_original"] + " " + noticia["resumen_original"]
+    ).lower()
+
+    if buscar and buscar.lower().strip() not in texto_busqueda:
+        continue
+
+    noticias_filtradas.append(noticia)
+
+
+# --------------------------------------------------
 # MÉTRICAS
-# ==========================================
-c1, c2, c3 = st.columns(3)
-with c1:
-    st.markdown(
-        f'<div class="metric">'
-        f'<div class="metric-label">Noticias encontradas</div>'
-        f'<div class="metric-value">{total_found}</div></div>',
-        unsafe_allow_html=True,
-    )
-with c2:
-    st.markdown(
-        f'<div class="metric">'
-        f'<div class="metric-label">Fuentes con resultados</div>'
-        f'<div class="metric-value">'
-        f'{working_sources}/{len(selected_sources)}'
-        f'</div></div>',
-        unsafe_allow_html=True,
-    )
-with c3:
-    st.markdown(
-        f'<div class="metric">'
-        f'<div class="metric-label">Hora de consulta</div>'
-        f'<div class="metric-value">'
-        f'{datetime.now().strftime("%H:%M")}'
-        f'</div></div>',
-        unsafe_allow_html=True,
-    )
-st.write("")
-with st.expander("Estado de las fuentes RSS"):
-    for name, status in statuses.items():
-        st.write(f"**{name}:** {status}")
-# ==========================================
-# MOSTRAR NOTICIAS EN ESPAÑOL
-# ==========================================
-st.subheader("📰 Noticias de ciberseguridad")
-if not articles:
-    st.info(
-        "No hay noticias con estos filtros. "
-        "Prueba otra categoría o cambia la búsqueda."
-    )
-else:
-    visible_articles = articles[:max_articles]
-    with st.spinner("Traduciendo noticias al español..."):
-        for article in visible_articles:
-            article["title"] = translate_to_spanish(
-                article["original_title"]
-            )
-            article["summary"] = translate_to_spanish(
-                article["original_summary"]
-            )
-    for index, article in enumerate(visible_articles):
-        # Sin contenedores con borde adicional para evitar
-        # los rectángulos vacíos que aparecían en el móvil.
-        st.caption(
-            f"{article['source']} · "
-            f"{article['category']} · "
-            f"{format_date(article['published'])}"
-        )
-        st.markdown(f"### {article['title']}")
-        if article["summary"]:
-            st.write(article["summary"])
-        st.link_button(
-            "Leer noticia original ↗",
-            article["link"],
-            key=f"article_{index}",
-        )
-        if (
-            article["title"] == article["original_title"]
-            and article["summary"] == article["original_summary"]
-        ):
-            st.caption(
-                "Aviso: la traducción no estuvo disponible; "
-                "se muestra el contenido original."
-            )
-        if index < len(visible_articles) - 1:
-            st.divider()
-# ==========================================
-# PIE DE PÁGINA
-# ==========================================
+# --------------------------------------------------
+
+total = len(noticias)
+total_filtrado = len(noticias_filtradas)
+total_fuentes = len(set(n["fuente"] for n in noticias))
+
+m1, m2, m3 = st.columns(3)
+
+m1.metric("Noticias recopiladas", total)
+m2.metric("Resultados filtrados", total_filtrado)
+m3.metric("Fuentes activas", total_fuentes)
+
 st.divider()
+
+
+# --------------------------------------------------
+# MOSTRAR NOTICIAS EN ESPAÑOL
+# --------------------------------------------------
+
+if not noticias_filtradas:
+    st.info("No hay noticias que coincidan con los filtros.")
+    st.stop()
+
+noticias_a_mostrar = noticias_filtradas[:max_noticias]
+
+st.subheader("📰 Últimas noticias")
 st.caption(
-    "CyberFeed · CondorHacks | Traducción automática. "
-    "Consulta la fuente original para verificar los detalles técnicos."
+    f"Mostrando {len(noticias_a_mostrar)} de "
+    f"{total_filtrado} resultados."
+)
+
+for indice, noticia in enumerate(noticias_a_mostrar, start=1):
+    with st.container():
+        st.markdown(
+            f'<span class="cf-tag">'
+            f'{html.escape(noticia["categoria"])}</span>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            f'<div class="cf-source">'
+            f'{html.escape(noticia["fuente"])}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        with st.spinner("Traduciendo noticia…" if indice == 1 else ""):
+            titulo_es = traducir_espanol(
+                noticia["titulo_original"]
+            )
+
+            resumen_es = traducir_espanol(
+                noticia["resumen_original"]
+            )
+
+        st.markdown(
+            f'<div class="cf-title">'
+            f'{html.escape(titulo_es)}</div>',
+            unsafe_allow_html=True,
+        )
+
+        if resumen_es:
+            st.markdown(
+                f'<div class="cf-summary">'
+                f'{html.escape(resumen_es)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("Esta noticia no incluye un resumen en el RSS.")
+
+        if noticia["fecha"]:
+            st.markdown(
+                f'<div class="cf-date">'
+                f'🕒 {html.escape(noticia["fecha"])}</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(f"[Leer noticia original ↗]({noticia['enlace']})")
+        st.divider()
+
+
+# --------------------------------------------------
+# PIE
+# --------------------------------------------------
+
+st.caption(
+    "CyberFeed · Las noticias pertenecen a sus respectivas fuentes. "
+    "La traducción automática puede contener errores."
 )
